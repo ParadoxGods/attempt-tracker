@@ -25,9 +25,9 @@ public class AttemptTrackerPanelTest
 			AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
 			panel.refresh(Arrays.asList(session("current", 1), session("older", 20)), "Fishing", "", new LureDisplay("1 per catch", "Detected automatically", "Live choice"));
 			JList<?> list = find(panel, JList.class); list.setSelectedIndex(1);
-			for (String amount : new String[]{"3 per catch", "5 per catch", "Unknown", "--"})
+			for (String amount : new String[]{"3 per catch", "5 per catch", "None", "Unknown", "--"})
 			{
-				panel.refreshLures(new LureDisplay(amount, "Restart harpooning for attempts", "Live choice"));
+				panel.refreshLures(new LureDisplay(amount, amount.equals("None") ? "No lures available" : "Restart harpooning for attempts", "Live choice"));
 				assertTrue(hasLabel(panel, amount)); assertTrue(hasLabel(panel, "20"));
 				assertEquals("older", ((FishingSession) list.getSelectedValue()).id);
 				panel.setSize(225, 1000); for (int i = 0; i < 3; i++) { layout(panel); }

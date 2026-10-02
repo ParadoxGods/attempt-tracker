@@ -52,6 +52,7 @@ import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.InteractingChanged;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.events.VarbitChanged;
@@ -579,6 +580,18 @@ public class AttemptTrackerPlugin extends Plugin
 		// Some updates arrive as a containing varp instead of a specific varbit.
 		if (event.getVarbitId() != VarbitID.SHARK_LURE_USE_QUANTITY && event.getVarbitId() != -1) { return; }
 		if (lastDisplayedRawLureSetting == client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)) { return; }
+		refreshLureDisplay();
+	}
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		if (!running || client.getGameState() != GameState.LOGGED_IN || event.getContainerId() != InventoryID.INV) { return; }
+		refreshLureDisplay();
+	}
+
+	private void refreshLureDisplay()
+	{
 		LureDisplay display = liveLureDisplay(); lureSnapshot = display;
 		final long run = generation;
 		SwingUtilities.invokeLater(() -> { synchronized (lifecycleLock) { if (panel != null && isCurrent(run)) { panel.refreshLures(display); } } });
@@ -836,14 +849,16 @@ public class AttemptTrackerPlugin extends Plugin
 		if (client == null || client.getGameState() != GameState.LOGGED_IN) { return LureDisplay.waiting(); }
 		int raw = client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY); lastDisplayedRawLureSetting = raw;
 		AttemptTrackerConfig.SharkLures selected = config.autoDetectLures() ? AttemptTrackerConfig.SharkLures.fromGameValue(raw) : config.sharkLures();
-		String amount = selected == null ? "Unknown" : selected.getQuantity() + " per catch";
+		String amount = selected == null ? "Unknown" : selected == AttemptTrackerConfig.SharkLures.NONE ? "None" : selected.getQuantity() + " per catch";
 		String note = config.autoDetectLures() ? "Detected automatically" : "Manual override";
-		String tooltip = "Live lure setting, independent of the session selected in history.";
-		if (client.getItemContainer(InventoryID.INV) == null) { note = "Inventory loading"; }
+		String tooltip = "Live lure availability, independent of the session selected in history. Selected choice: " + amount + ".";
+		if (client.getItemContainer(InventoryID.INV) == null) { amount = "--"; note = "Inventory loading"; }
 		else if (lureQuantity() <= 0)
 		{
-			note = hasTackleBox() ? "Tackle box supply unverified" : "No lures available";
-			tooltip += hasTackleBox() ? " Hidden supplies cannot establish a lure attempt schedule." : " Estimates use the no-lure schedule until lures are available.";
+			boolean hiddenSupply = hasTackleBox();
+			amount = hiddenSupply ? "Unknown" : "None";
+			note = hiddenSupply ? "Tackle box supply unverified" : "No lures available";
+			tooltip += hiddenSupply ? " Hidden supplies cannot establish a lure attempt schedule." : " No shark lures are carried. Estimates use the no-lure schedule until lures are available.";
 		}
 		else if (selected == null) { note = "Choice not recognized"; tooltip += " Catch attempts cannot be estimated for this choice."; }
 		else if (fishingActivity.isActive() && previousContext != null && previousContext.shark

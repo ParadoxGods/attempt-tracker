@@ -1356,16 +1356,60 @@ public class AttemptTrackerPluginTest
         assertTrue(h.engine.getSessions().isEmpty());
     }
 
+    @Test public void inventoryChangesImmediatelyShowNoLuresAndRestockedQuantityWithoutResettingSession() throws Exception
+    {
+        Harness h = new Harness(false); when(h.config.autoDetectLures()).thenReturn(true);
+        when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(3);
+        when(h.config.sharkFirstRollDelay()).thenReturn(0); h.startSharks(); h.tick(0); h.ticks(1, 4, 4);
+        com.attempttracker.core.FishingSessions book = (com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions");
+        String id = book.current().id; long catches = book.current().catches;
+        when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(0); when(h.inventory.getItems()).thenReturn(new Item[0]);
+        h.plugin.onItemContainerChanged(new net.runelite.api.events.ItemContainerChanged(InventoryID.INV, h.inventory));
+        com.attempttracker.ui.LureDisplay shown = (com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot");
+        assertEquals("None", shown.amount); assertEquals("No lures available", shown.note);
+        assertEquals(id, book.current().id); assertEquals(catches, book.current().catches);
+        when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(5);
+        net.runelite.api.events.VarbitChanged choice = new net.runelite.api.events.VarbitChanged(); choice.setVarbitId(VarbitID.SHARK_LURE_USE_QUANTITY);
+        h.plugin.onVarbitChanged(choice);
+        assertEquals("None", ((com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot")).amount);
+        when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(300); when(h.inventory.getItems()).thenReturn(new Item[]{new Item(ItemID.SHARK_LURE, 300)});
+        h.plugin.onItemContainerChanged(new net.runelite.api.events.ItemContainerChanged(InventoryID.INV, h.inventory));
+        assertEquals("5 per catch", ((com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot")).amount);
+        assertEquals(id, book.current().id); assertEquals(catches, book.current().catches);
+    }
+
+    @Test public void unrelatedContainerChangesAndLogoutDoNotReportMissingLures() throws Exception
+    {
+        Harness h = new Harness(false); when(h.config.autoDetectLures()).thenReturn(true);
+        when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(3); h.tick(0);
+        when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(0); when(h.inventory.getItems()).thenReturn(new Item[0]);
+        h.plugin.onItemContainerChanged(new net.runelite.api.events.ItemContainerChanged(InventoryID.BANK, h.inventory));
+        assertEquals("3 per catch", ((com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot")).amount);
+        when(h.client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+        net.runelite.api.events.GameStateChanged logout = new net.runelite.api.events.GameStateChanged(); logout.setGameState(GameState.LOGIN_SCREEN);
+        h.plugin.onGameStateChanged(logout);
+        h.plugin.onItemContainerChanged(new net.runelite.api.events.ItemContainerChanged(InventoryID.INV, h.inventory));
+        assertEquals("--", ((com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot")).amount);
+    }
+
+    @Test public void noLureDisplayDoesNotDependOnARecognizedSavedChoice() throws Exception
+    {
+        Harness h = new Harness(false); when(h.config.autoDetectLures()).thenReturn(true);
+        when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(999);
+        when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(0); when(h.inventory.getItems()).thenReturn(new Item[0]); h.tick(0);
+        assertEquals("None", ((com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot")).amount);
+    }
+
     @Test public void lureDisplaySeparatesKnownChoiceFromMissingAndHiddenSupply() throws Exception
     {
         Harness h = new Harness(false); when(h.config.autoDetectLures()).thenReturn(true);
         when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(3);
         when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(0); when(h.inventory.getItems()).thenReturn(new Item[0]); h.tick(0);
         com.attempttracker.ui.LureDisplay shown = (com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot");
-        assertEquals("3 per catch", shown.amount); assertEquals("No lures available", shown.note);
+        assertEquals("None", shown.amount); assertEquals("No lures available", shown.note);
         when(h.inventory.getItems()).thenReturn(new Item[]{new Item(ItemID.TACKLE_BOX, 1)}); h.tick(1);
         shown = (com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot");
-        assertEquals("3 per catch", shown.amount); assertEquals("Tackle box supply unverified", shown.note);
+        assertEquals("Unknown", shown.amount); assertEquals("Tackle box supply unverified", shown.note);
         when(h.client.getGameState()).thenReturn(GameState.LOGIN_SCREEN); h.tick(2);
         shown = (com.attempttracker.ui.LureDisplay)get(h.plugin, "lureSnapshot");
         assertEquals("--", shown.amount); assertEquals("Log in to detect", shown.note);

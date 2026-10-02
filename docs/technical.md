@@ -2,12 +2,12 @@
 
 <img src="../icon.png" alt="Attempt Tracker fish and stopwatch icon" width="48" height="48">
 
-Version **1.1.7** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
+Version **1.1.8** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
 
 ## Using the plugin
 
 1. Launch the development client and enable **Attempt Tracker**. Open its fish-and-stopwatch sidebar button.
-2. Choose 1, 3, or 5 lures in-game. The sidebar shows **Detected lures: 3 per catch**, for example, and updates as the game choice changes; no plugin setting is needed. This is your selected quantity, not the number of lures left. A note identifies missing supplies, an unverified tackle box, or a needed harpooning restart. Without visible lures or a tackle box, estimates use the no-lure schedule.
+2. Choose 1, 3, or 5 lures in-game. The sidebar shows **Detected lures: 3 per catch**, for example, and updates as the game choice or carried supply changes; no plugin setting is needed. This is your selected quantity, not the number of lures left. When no lures or tackle box are carried, it shows **None / No lures available**, and estimates use the no-lure schedule. An unverified tackle box shows **Unknown**; an unloaded inventory shows `--`. A note identifies a needed harpooning restart. The empty Fishing configuration section has been removed.
 3. Interact with a fishing spot. The fishing clock starts when you begin fishing there, after any walking. Shark attempt estimates separately require the game message `You start harpooning fish.` to anchor their schedule. Casing, repeated spaces, a missing final punctuation mark, `!`, and `...` are also accepted. A catch or animation alone cannot anchor a shark attempt schedule.
 4. Fishing time and ticks pause on logout, a different action or animation, movement, a full inventory, or a moved/despawned fishing spot. Clicking Inventory or Skills tabs, examining objects, or dropping fish does not interrupt the timer.
 5. Interact with a fishing spot again to resume fishing time; a fresh harpooning start resumes shark attempt measurement. Existing totals remain. **Reset session** is the only action that clears the current totals and timers; it archives the previous session first.
@@ -65,25 +65,25 @@ On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
 
 Outputs:
 
-- `build/distributions/attempt-tracker-1.1.7.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
-- `build/libs/attempt-tracker-1.1.7-all.jar`: executable client with the plugin registered.
-- `build/libs/attempt-tracker-1.1.7.jar`: plugin-only JAR for development tooling.
+- `build/distributions/attempt-tracker-1.1.8.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
+- `build/libs/attempt-tracker-1.1.8-all.jar`: executable client with the plugin registered.
+- `build/libs/attempt-tracker-1.1.8.jar`: plugin-only JAR for development tooling.
 - `build/preview/attempt-tracker.png`: sidebar and overlay preview using demonstration data.
 - `build/reports/tests/test/index.html`: test report.
 
 Extract the ZIP and run `start-attempt-tracker.bat`, or launch directly:
 
 ```powershell
-java -ea -jar .\attempt-tracker-1.1.7-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
+java -ea -jar .\attempt-tracker-1.1.8-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
 ```
 
-`-ea` is required for RuneLite's development plugin loader. The executable bundles client dependencies and the launcher, excluding JUnit/Mockito/test classes. The plugin-only JAR does not install itself in a normal client. Plugin Hub submission is in progress. Installation through the normal client becomes available only after RuneLite maintainers approve and merge the submission.
+`-ea` is required for RuneLite's development plugin loader. The executable bundles client dependencies and the launcher, excluding JUnit/Mockito/test classes. The plugin-only JAR does not install itself in a normal client. The initial [Plugin Hub submission](https://github.com/runelite/plugin-hub/pull/17633) was merged; further updates still require RuneLite's review and build process.
 
 For a Jagex account, use RuneLite's official [Using Jagex Accounts](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts) development workflow. Keep `.runelite/credentials.properties` private; the plugin does not handle credentials.
 
 ## Validation
 
-**198 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
+**201 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
 
 Historical **v1.0.4** live test: crystal harpoon, three lures, Fishing 77, start tick 24. Deadlines 28 through 128 produced 17 catches and four inferred failures over 21 attempts. Lure consumption was 51, and Fishing XP was 22 per catch. Another 11 idle ticks added no attempts; logout preserved totals. This verifies that particular three-lure cadence. The one-lure live validation is documented below; it is separate from this older three-lure test.
 

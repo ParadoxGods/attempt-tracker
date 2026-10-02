@@ -1,6 +1,6 @@
 package com.attempttracker.ui;
 
-/** Live game choice, displayed separately from historical session totals. */
+/** Live lure availability and game choice, separate from historical session totals. */
 public final class LureDisplay
 {
 	public final String amount;

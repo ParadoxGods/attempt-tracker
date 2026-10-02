@@ -33,7 +33,6 @@ public interface AttemptTrackerConfig extends Config
 	@ConfigItem(keyName = "pickpocketing", name = "Pickpocketing", description = "Track explicit pickpocket success/failure messages, grouped by NPC", section = observed, hidden = true, position = 1)
 	default boolean pickpocketing() { return true; }
 
-	@ConfigSection(name = "Fishing", description = "Automatically detects the in-game shark lure choice", position = 2)
 	String gathering = "gathering";
 	@ConfigItem(keyName = "autoDetectLures", name = "Detect shark lures automatically", description = "Read the in-game lure selection instead of a manual declaration", section = gathering, hidden = true, position = 2)
 	default boolean autoDetectLures() { return true; }
