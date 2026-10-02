@@ -1,0 +1,10 @@
+.gradle/
+build/
+.idea/
+*.iml
+out/
+.DS_Store
+
+# Private workspace handoff notes
+/AGENTS.md
+/AI_NOTES.md

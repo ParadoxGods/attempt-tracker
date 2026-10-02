@@ -1,0 +1,85 @@
+plugins {
+	id 'java'
+}
+
+repositories {
+	maven {
+		url = 'https://repo.runelite.net'
+		content { includeGroupByRegex('net\\.runelite.*') }
+	}
+	mavenCentral()
+}
+
+def runeLiteVersion = providers.gradleProperty('runeLiteVersion').orElse('latest.release').get()
+
+configurations {
+	developmentClient
+	testImplementation.extendsFrom developmentClient
+}
+
+dependencies {
+	compileOnly "net.runelite:client:${runeLiteVersion}"
+	developmentClient "net.runelite:client:${runeLiteVersion}"
+	developmentClient "net.runelite:jshell:${runeLiteVersion}"
+	testImplementation 'junit:junit:4.13.2'
+	testImplementation 'org.mockito:mockito-core:4.11.0'
+}
+
+group = 'com.attempttracker'
+version = '1.1.6'
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release.set(11)
+}
+
+test {
+	systemProperty 'java.awt.headless', 'true'
+}
+
+tasks.register('run', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.attempttracker.AttemptTrackerLauncher'
+	jvmArgs '-ea'
+	args '--developer-mode', '--debug', '--disable-telemetry', '--profile', 'attempt-tracker-dev'
+}
+
+tasks.register('preview', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.attempttracker.ui.AttemptTrackerPreview'
+	systemProperty 'java.awt.headless', 'true'
+	args layout.buildDirectory.file('preview/attempt-tracker.png').get().asFile.absolutePath
+}
+
+tasks.register('shadowJar', Jar) {
+	dependsOn tasks.named('testClasses')
+	archiveClassifier.set('all')
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	manifest {
+		attributes('Main-Class': 'com.attempttracker.AttemptTrackerLauncher', 'Multi-Release': 'true')
+	}
+	from sourceSets.main.output
+	from(sourceSets.test.output) { include 'com/attempttracker/AttemptTrackerLauncher.class' }
+	from { configurations.developmentClient.collect { it.isDirectory() ? it : zipTree(it) } }
+	configurations.developmentClient.each { dependency ->
+		if (dependency.name.endsWith('.jar')) {
+			from(zipTree(dependency)) {
+				include '**/LICENSE*', '**/NOTICE*', '**/COPYING*'
+				into "META-INF/third-party/${dependency.name}"
+			}
+		}
+	}
+	exclude 'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', '**/module-info.class'
+}
+
+tasks.register('releaseZip', Zip) {
+	dependsOn tasks.named('jar'), tasks.named('shadowJar')
+	archiveFileName.set("attempt-tracker-${project.version}.zip")
+	destinationDirectory.set(layout.buildDirectory.dir('distributions'))
+	from(tasks.named('jar'))
+	from(tasks.named('shadowJar'))
+	from('README.md', 'LICENSE', 'icon.png', 'runelite-plugin.properties', 'start-attempt-tracker.bat')
+	from('docs') { into 'docs' }
+}
+
+tasks.named('build') { dependsOn tasks.named('shadowJar') }
