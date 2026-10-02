@@ -7,8 +7,8 @@ import com.attempttracker.diagnostics.TickTrace;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import net.runelite.client.util.Filepath;
+import static com.attempttracker.FilepathTestSupport.*;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -1071,7 +1071,7 @@ public class AttemptTrackerPluginTest
 	public void enabledTraceWritesTheActualUnsupportedAnimationAndMissingContextRows() throws Exception
 	{
 		Harness h = new Harness(true);
-		Path directory = temporaryFolder.newFolder("trace").toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporaryFolder.newFolder("trace").toPath());
 		TickTrace trace = new TickTrace(directory);
 		ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1);
 		try
@@ -1088,14 +1088,14 @@ public class AttemptTrackerPluginTest
 			// The single worker runs this barrier after both actual adapter writes.
 			worker.submit(() -> { trace.close(); return null; }).get(5, TimeUnit.SECONDS);
 
-			List<Path> csvFiles;
-			try (Stream<Path> files = Files.list(directory))
+			List<Filepath> csvFiles;
+			try (Stream<Filepath> files = directory.walk(1).filter(path -> !path.equals(directory)))
 			{
-				csvFiles = files.filter(path -> path.getFileName().toString().endsWith(".csv"))
+				csvFiles = files.filter(path -> path.getFileName().endsWith(".csv"))
 					.collect(Collectors.toList());
 			}
 			assertEquals(1, csvFiles.size());
-			List<String> lines = Files.readAllLines(csvFiles.get(0), StandardCharsets.UTF_8);
+			List<String> lines = readLines(csvFiles.get(0));
 			assertEquals("Both rejected ticks must still be written", 3, lines.size());
 			assertTrue(lines.get(0).contains("timing_result,live_interaction,context_problem"));
 			assertTrue(lines.get(1).contains(",0,123456,"));
@@ -1108,11 +1108,7 @@ public class AttemptTrackerPluginTest
 		finally
 		{
 			worker.shutdown();
-			if (!worker.awaitTermination(5, TimeUnit.SECONDS))
-			{
-				worker.shutdownNow();
-				assertTrue("Trace worker must terminate", worker.awaitTermination(5, TimeUnit.SECONDS));
-			}
+			assertTrue("Trace worker must terminate", worker.awaitTermination(5, TimeUnit.SECONDS));
 			trace.close();
 		}
 	}

@@ -6,7 +6,8 @@ import com.attempttracker.store.SessionStore;
 import com.google.gson.Gson;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.nio.file.Path;
+import net.runelite.client.util.Filepath;
+import static com.attempttracker.FilepathTestSupport.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -30,9 +31,23 @@ public class AttemptTrackerLifecycleTest
 	public TemporaryFolder temporary = new TemporaryFolder();
 
 	@Test
+	public void interruptedShutdownWaitLeavesTheWorkerToFinishGracefully() throws Exception
+	{
+		SessionStore store = new SessionStore(Filepath.Unchecked.getRooted(temporary.newFolder().toPath()), new Gson());
+		ScheduledExecutorService worker = mock(ScheduledExecutorService.class);
+		when(worker.awaitTermination(2, TimeUnit.SECONDS)).thenThrow(new InterruptedException("Interrupted wait"));
+		AttemptTrackerPlugin plugin = initialized(store, worker);
+		plugin.shutDown();
+		verify(worker).execute(any(Runnable.class));
+		verify(worker).shutdown();
+		verify(worker).awaitTermination(2, TimeUnit.SECONDS);
+		SwingUtilities.invokeAndWait(() -> {});
+	}
+
+	@Test
 	public void shutdownCancelsOlderSaveAndPersistsTheFinalExcludedWindow() throws Exception
 	{
-		Path directory = temporary.newFolder().toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
 		SessionStore store = new SessionStore(directory, new Gson());
 		ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1);
 		AttemptTrackerPlugin plugin = initialized(store, worker);
@@ -53,7 +68,7 @@ public class AttemptTrackerLifecycleTest
 		}
 		finally
 		{
-			worker.shutdownNow();
+			worker.shutdown();
 			SwingUtilities.invokeAndWait(() -> {});
 		}
 	}
@@ -100,7 +115,7 @@ public class AttemptTrackerLifecycleTest
 			{
 				started.countDown();
 				try { release.await(2, TimeUnit.SECONDS); }
-				catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+				catch (InterruptedException ex) { throw new AssertionError("Test worker unexpectedly interrupted", ex); }
 			});
 			assertTrue(started.await(2, TimeUnit.SECONDS));
 			invoke(plugin, "submitIo", new Class<?>[]{long.class, ScheduledExecutorService.class, Runnable.class},
@@ -117,7 +132,7 @@ public class AttemptTrackerLifecycleTest
 		finally
 		{
 			release.countDown();
-			worker.shutdownNow();
+			worker.shutdown();
 		}
 	}
 

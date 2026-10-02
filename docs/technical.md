@@ -2,7 +2,7 @@
 
 <img src="../icon.png" alt="Attempt Tracker fish and stopwatch icon" width="48" height="48">
 
-Version **1.1.6** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
+Version **1.1.7** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
 
 ## Using the plugin
 
@@ -41,7 +41,11 @@ Tick manipulation and inherited skilling timers can change the first phase or ca
 
 ## History and export
 
-Manual fishing sessions are saved locally in `.runelite/attempt-tracker/fishing-sessions.json`, with up to 200 sessions. CSV exports contain catches, measured catches, minimum/maximum failures and rates, both clocks in milliseconds, and fishing ticks. Rates are proportions from 0 to 1. Unknown rates are blank.
+Manual fishing sessions are saved locally in `.runelite/plugin-data/attempt-tracker/fishing-sessions.json`, with up to 200 sessions. CSV exports contain catches, measured catches, minimum/maximum failures and rates, both clocks in milliseconds, and fishing ticks. Rates are proportions from 0 to 1. Unknown rates are blank.
+
+All production filesystem operations use RuneLite's [Filepath API](https://static.runelite.net/runelite-client/apidocs/net/runelite/client/util/Filepath.html). History is read with a 2 MiB bound and replaced atomically within the plugin data directory, with a non-atomic move fallback where required by the filesystem. CSV export uses `Filepath.Chooser` and writes only the explicitly selected file; it does not create temporary files beside it or access its parent. The I/O worker shuts down gracefully and finishes queued saves without thread interruption.
+
+RuneLite migrates the previous `.runelite/attempt-tracker` directory on first use of `getPluginDirectory()` when the new directory does not already exist. Both session files, backups, and traces move together.
 
 Legacy per-setup history remains in `sessions.json`. On the first upgrade, the most recently updated timed fishing profile is imported into the current manual session. Old elapsed times were not recorded and cannot be recovered. Other legacy profiles remain in their original file. Corrupt JSON is backed up before replacement.
 
@@ -61,16 +65,16 @@ On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
 
 Outputs:
 
-- `build/distributions/attempt-tracker-1.1.6.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
-- `build/libs/attempt-tracker-1.1.6-all.jar`: executable client with the plugin registered.
-- `build/libs/attempt-tracker-1.1.6.jar`: plugin-only JAR for development tooling.
+- `build/distributions/attempt-tracker-1.1.7.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
+- `build/libs/attempt-tracker-1.1.7-all.jar`: executable client with the plugin registered.
+- `build/libs/attempt-tracker-1.1.7.jar`: plugin-only JAR for development tooling.
 - `build/preview/attempt-tracker.png`: sidebar and overlay preview using demonstration data.
 - `build/reports/tests/test/index.html`: test report.
 
 Extract the ZIP and run `start-attempt-tracker.bat`, or launch directly:
 
 ```powershell
-java -ea -jar .\attempt-tracker-1.1.6-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
+java -ea -jar .\attempt-tracker-1.1.7-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
 ```
 
 `-ea` is required for RuneLite's development plugin loader. The executable bundles client dependencies and the launcher, excluding JUnit/Mockito/test classes. The plugin-only JAR does not install itself in a normal client. Plugin Hub submission is in progress. Installation through the normal client becomes available only after RuneLite maintainers approve and merge the submission.
@@ -79,7 +83,7 @@ For a Jagex account, use RuneLite's official [Using Jagex Accounts](https://gith
 
 ## Validation
 
-**194 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
+**198 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
 
 Historical **v1.0.4** live test: crystal harpoon, three lures, Fishing 77, start tick 24. Deadlines 28 through 128 produced 17 catches and four inferred failures over 21 attempts. Lure consumption was 51, and Fishing XP was 22 per catch. Another 11 idle ticks added no attempts; logout preserved totals. This verifies that particular three-lure cadence. The one-lure live validation is documented below; it is separate from this older three-lure test.
 

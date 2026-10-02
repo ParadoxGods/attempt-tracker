@@ -12,14 +12,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import net.runelite.client.util.Filepath;
 
 /** Local, bounded session persistence. The tracking engine validates restored sessions. */
 public final class SessionStore
@@ -27,12 +26,12 @@ public final class SessionStore
 	private static final int FORMAT_VERSION = 1;
 	private static final int MAX_SESSIONS = 200;
 	private static final int MAX_FILE_BYTES = 2 * 1024 * 1024;
-	private final Path directory;
+	private final Filepath directory;
 	private final Gson gson;
 	private String lastLoadWarning = "";
 	private boolean preserveUnreadableHistory;
 
-	public SessionStore(Path directory, Gson gson)
+	public SessionStore(Filepath directory, Gson gson)
 	{
 		this.directory = Objects.requireNonNull(directory);
 		this.gson = Objects.requireNonNull(gson);
@@ -43,19 +42,19 @@ public final class SessionStore
 	{
 		lastLoadWarning = "";
 		preserveUnreadableHistory = false;
-		Path file = directory.resolve("sessions.json");
-		if (!Files.exists(file))
+		Filepath file = directory.join("sessions.json");
+		if (!file.exists())
 		{
 			return Collections.emptyList();
 		}
-		if (Files.size(file) > MAX_FILE_BYTES)
+		if (file.size() > MAX_FILE_BYTES)
 		{
 			lastLoadWarning = "Saved history exceeds the size limit.";
 			preserveUnreadableHistory = true;
 			return Collections.emptyList();
 		}
 		byte[] bytes;
-		try (InputStream stream = Files.newInputStream(file))
+		try (InputStream stream = file.openInputStream())
 		{
 			bytes = stream.readNBytes(MAX_FILE_BYTES + 1);
 		}
@@ -137,19 +136,19 @@ public final class SessionStore
 		{
 			throw new IOException("Session history exceeds the size limit");
 		}
-		Files.createDirectories(directory);
-		Path destination = directory.resolve("sessions.json");
-		if (preserveUnreadableHistory && Files.exists(destination))
+		directory.createDirectories();
+		Filepath destination = directory.join("sessions.json");
+		if (preserveUnreadableHistory && destination.exists())
 		{
 			// Copy before replacing so a failed backup never destroys the original history.
-			Path backup = Files.createTempFile(directory, "sessions.unreadable-" + System.currentTimeMillis() + "-", ".json");
+			Filepath backup = directory.createTempFile("sessions.unreadable-" + System.currentTimeMillis() + "-", ".json");
 			try
 			{
-				Files.copy(destination, backup, StandardCopyOption.REPLACE_EXISTING);
+				destination.copyTo(backup, StandardCopyOption.REPLACE_EXISTING);
 			}
 			catch (IOException ex)
 			{
-				Files.deleteIfExists(backup);
+				backup.deleteIfExists();
 				throw ex;
 			}
 			preserveUnreadableHistory = false;
@@ -158,7 +157,7 @@ public final class SessionStore
 	}
 
 	/** CSV rates are proportions (0..1). Text is protected against spreadsheet formulas. */
-	public void exportCsv(List<AttemptSession> sessions, Path destination) throws IOException
+	public void exportCsv(List<AttemptSession> sessions, Filepath destination) throws IOException
 	{
 		StringBuilder csv = new StringBuilder("session_id,activity,setup,method,started_at_utc,updated_at_utc,attempts,successes,failures,success_rate,ci95_lower,ci95_upper,cycle_ticks,excluded_windows\r\n");
 		for (AttemptSession session : bounded(sessions))
@@ -179,9 +178,8 @@ public final class SessionStore
 				.append(session.getCycleTicks()).append(',')
 				.append(session.getExcludedWindows()).append("\r\n");
 		}
-		Path target = Objects.requireNonNull(destination).toAbsolutePath();
-		Files.createDirectories(target.getParent());
-		writeAtomically(target, csv.toString().getBytes(StandardCharsets.UTF_8));
+		// A chooser grants access to the selected file only, not its siblings.
+		Objects.requireNonNull(destination).write(csv.toString());
 	}
 
 	static String csvText(String text)
@@ -223,24 +221,24 @@ public final class SessionStore
 		return result;
 	}
 
-	static void writeAtomically(Path destination, byte[] bytes) throws IOException
+	static void writeAtomically(Filepath destination, byte[] bytes) throws IOException
 	{
-		Path temporary = Files.createTempFile(destination.toAbsolutePath().getParent(), "attempt-tracker-", ".tmp");
+		Filepath temporary = destination.getParent().createTempFile("attempt-tracker-", ".tmp");
 		try
 		{
-			Files.write(temporary, bytes);
+			temporary.write(bytes);
 			try
 			{
-				Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+				temporary.moveTo(destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 			}
 			catch (AtomicMoveNotSupportedException ex)
 			{
-				Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+				temporary.moveTo(destination, StandardCopyOption.REPLACE_EXISTING);
 			}
 		}
 		finally
 		{
-			Files.deleteIfExists(temporary);
+			temporary.deleteIfExists();
 		}
 	}
 }

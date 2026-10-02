@@ -19,7 +19,6 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -34,10 +33,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
-import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -62,7 +59,6 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.gameval.VarbitID;
-import net.runelite.client.RuneLite;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -74,6 +70,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.Filepath;
 import net.runelite.client.util.Text;
 import net.runelite.client.util.ImageUtil;
 import org.slf4j.Logger;
@@ -81,6 +78,8 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Attempt Tracker",
+	internalName = "attempt-tracker",
+	legacyDataDirectory = "attempt-tracker",
 	description = "Track fishing catches, estimated failures, catch rate, and session time",
 	tags = {"fishing", "shark", "lures", "success", "statistics"}
 )
@@ -145,13 +144,13 @@ public class AttemptTrackerPlugin extends Plugin
 	AttemptTrackerConfig provideConfig(ConfigManager manager) { return manager.getConfig(AttemptTrackerConfig.class); }
 
 	@Override
-	protected void startUp()
+	protected void startUp() throws IOException
 	{
 		final long run;
 		synchronized (lifecycleLock)
 		{
 		run = ++generation;
-		Path directory = RuneLite.RUNELITE_DIR.toPath().resolve("attempt-tracker");
+		Filepath directory = getPluginDirectory();
 		store = new SessionStore(directory, gson);
 		try { engine.restore(store.load()); notice = store.getLastLoadWarning(); }
 		catch (IOException ex) { LOG.warn("Unable to load attempt history", ex); notice = "History could not be loaded."; engine.clear(); }
@@ -169,7 +168,7 @@ public class AttemptTrackerPlugin extends Plugin
 		io = worker;
 		pendingSave = null;
 		savedFingerprint = Long.MIN_VALUE;
-		trace = new TickTrace(directory.resolve("traces"));
+		trace = new TickTrace(directory.join("traces"));
 		custom = new CustomActivity(config);
 		paused = false;
 		running = true;
@@ -227,7 +226,7 @@ public class AttemptTrackerPlugin extends Plugin
 			worker.execute(() -> { try { save(runStore, finalHistory, run); saveFishing(runFishingStore, finalFishing, run); } finally { closeTrace(runTrace, run); } });
 			worker.shutdown();
 			try { if (!worker.awaitTermination(2, TimeUnit.SECONDS)) { LOG.warn("Attempt Tracker saves are still finishing in the background"); } }
-			catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+			catch (InterruptedException ex) { LOG.warn("Interrupted while waiting for saves; they will finish in the background", ex); }
 		}
 		clearPending(); previousContext = null; previousPosition = null; lastExperience.clear();
 		currentSnapshot = null;
@@ -971,16 +970,17 @@ public class AttemptTrackerPlugin extends Plugin
 		final FishingSessionStore runStore = fishingStore;
 		final ScheduledExecutorService worker = io;
 		final AttemptTrackerPanel exportPanel = panel;
-		JFileChooser chooser = new JFileChooser();
-		chooser.setDialogTitle("Export Attempt Tracker sessions");
-		chooser.setFileFilter(new FileNameExtensionFilter("CSV files", "csv"));
-		chooser.setSelectedFile(new java.io.File("attempt-tracker-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".csv"));
-		if (chooser.showSaveDialog(exportPanel) != JFileChooser.APPROVE_OPTION || !isCurrent(run) || worker == null || worker.isShutdown()) { return; }
-		Path destination = chooser.getSelectedFile().toPath();
-		if (!destination.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".csv")) { destination = destination.resolveSibling(destination.getFileName() + ".csv"); }
-		if (java.nio.file.Files.exists(destination) && JOptionPane.showConfirmDialog(exportPanel, "Replace this CSV file?", "Export CSV", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return; }
+		List<Filepath> selection = new Filepath.Chooser()
+			.setIsSave()
+			.setDialogTitle("Export Attempt Tracker sessions")
+			.addExtensionFilter("CSV files", "csv")
+			.setDefaultExtension("csv")
+			.setFileName("attempt-tracker-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".csv")
+			.showDialog(exportPanel);
+		if (selection == null || selection.isEmpty() || !isCurrent(run) || worker == null || worker.isShutdown()) { return; }
+		final Filepath target = selection.get(0);
+		if (target.exists() && JOptionPane.showConfirmDialog(exportPanel, "Replace this CSV file?", "Export CSV", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return; }
 		if (!isCurrent(run) || worker.isShutdown()) { return; }
-		final Path target = destination;
 		final List<FishingSession> snapshot = new ArrayList<>(fishingHistorySnapshot);
 		submitIo(run, worker, () ->
 		{

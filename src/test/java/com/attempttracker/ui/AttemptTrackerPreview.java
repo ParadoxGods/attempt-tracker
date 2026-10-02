@@ -10,9 +10,10 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.io.OutputStream;
+import net.runelite.client.util.Filepath;
 import java.util.Arrays;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
@@ -27,8 +28,10 @@ public final class AttemptTrackerPreview
 
 	public static void main(String[] args) throws Exception
 	{
-		Path destination = Paths.get(args.length == 0 ? "build/preview/attempt-tracker.png" : args[0]);
-		Files.createDirectories(destination.toAbsolutePath().getParent());
+		Path requested = Paths.get(args.length == 0 ? "build/preview/attempt-tracker.png" : args[0]).toAbsolutePath();
+		Filepath directory = Filepath.Unchecked.getRooted(requested.getParent());
+		directory.createDirectories();
+		Filepath destination = directory.joinSegment(requested.getFileName().toString());
 		SwingUtilities.invokeAndWait(() ->
 		{
 			try
@@ -40,10 +43,10 @@ public final class AttemptTrackerPreview
 				throw new IllegalStateException(ex);
 			}
 		});
-		System.out.println("Preview: " + destination.toAbsolutePath());
+		System.out.println("Preview: " + destination);
 	}
 
-	private static void render(Path destination) throws IOException
+	private static void render(Filepath destination) throws IOException
 	{
 		UIManager.put("Panel.background", new Color(40, 43, 48));
 		UIManager.put("Label.font", new Font("SansSerif", Font.PLAIN, 12));
@@ -93,7 +96,7 @@ public final class AttemptTrackerPreview
         Graphics2D variableGraphics = (Graphics2D) graphics.create(535, 42, 225, 650);
         variablePanel.printAll(variableGraphics); variableGraphics.dispose();
 		graphics.dispose();
-		ImageIO.write(image, "png", destination.toFile());
+		try (OutputStream output = destination.openOutputStream()) { ImageIO.write(image, "png", output); }
 	}
 
 	private static void layout(Container container)

@@ -5,8 +5,8 @@ import com.attempttracker.core.TrackingMethod;
 import com.google.gson.Gson;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import net.runelite.client.util.Filepath;
+import static com.attempttracker.FilepathTestSupport.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -23,9 +23,18 @@ public class SessionStoreTest
 	public TemporaryFolder temporary = new TemporaryFolder();
 
 	@Test
+	public void legacyCsvExportAlsoAcceptsAFileScopedSelection() throws IOException
+	{
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
+		Filepath selected = directory.join("legacy.csv").rooted();
+		new SessionStore(directory, new Gson()).exportCsv(Collections.singletonList(session("one", "Fishing", "", 9, 1)), selected);
+		assertTrue(readString(selected).contains(",10,9,1,0.9,"));
+	}
+
+	@Test
 	public void roundTripPreservesAllSessionFieldsAndLeavesNoTemporaryFiles() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
 		SessionStore store = new SessionStore(directory, new Gson());
 		AttemptSession original = session("one", "Shark fishing", "Crystal harpoon; 3 lures", 950, 50);
 		store.save(Collections.singletonList(original));
@@ -44,7 +53,7 @@ public class SessionStoreTest
 		assertEquals("", store.getLastLoadWarning());
 		store.save(Collections.singletonList(session("two", "Cooking", "", 1, 2)));
 		assertEquals("two", store.load().get(0).getId());
-		try (Stream<Path> files = Files.list(directory))
+		try (Stream<Filepath> files = directory.walk(1).filter(path -> !path.equals(directory)))
 		{
 			assertEquals(1, files.count());
 		}
@@ -53,24 +62,24 @@ public class SessionStoreTest
 	@Test
 	public void corruptOrUnsupportedHistoryDoesNotCrashOrChangeSource() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
 		SessionStore store = new SessionStore(directory, new Gson());
-		Path source = directory.resolve("sessions.json");
+		Filepath source = directory.join("sessions.json");
 		for (String invalid : Arrays.asList("{broken", "null", "[]", "{\"version\":99,\"sessions\":[]}"))
 		{
-			Files.write(source, invalid.getBytes(StandardCharsets.UTF_8));
+			source.write(invalid.getBytes(StandardCharsets.UTF_8));
 			assertTrue(store.load().isEmpty());
 			assertFalse(store.getLastLoadWarning().isEmpty());
-			assertEquals(invalid, new String(Files.readAllBytes(source), StandardCharsets.UTF_8));
+			assertEquals(invalid, new String(readBytes(source), StandardCharsets.UTF_8));
 		}
 	}
 
 	@Test
 	public void oversizedFilesAreRejectedAndSessionHistoryIsBounded() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
 		SessionStore store = new SessionStore(directory, new Gson());
-		Files.write(directory.resolve("sessions.json"), new byte[2 * 1024 * 1024 + 1]);
+		directory.join("sessions.json").write( new byte[2 * 1024 * 1024 + 1]);
 		assertTrue(store.load().isEmpty());
 		assertTrue(store.getLastLoadWarning().contains("size limit"));
 		List<AttemptSession> sessions = new ArrayList<>();
@@ -86,10 +95,10 @@ public class SessionStoreTest
 	@Test
 	public void invalidEntriesAreSkippedWithoutDiscardingValidEntries() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
 		SessionStore store = new SessionStore(directory, new Gson());
 		String valid = new Gson().toJson(session("ok", "Fishing", "", 1, 0));
-		Files.write(directory.resolve("sessions.json"),
+		directory.join("sessions.json").write(
 			("{\"version\":1,\"sessions\":[null,42,{\"successes\":\"bad\"}," + valid + "]}").getBytes(StandardCharsets.UTF_8));
 		assertEquals(1, store.load().size());
 		assertEquals("ok", store.load().get(0).getId());
@@ -99,23 +108,23 @@ public class SessionStoreTest
 	@Test
 	public void unreadableHistoryIsBackedUpBeforeTheFirstReplacement() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
-		Path source = directory.resolve("sessions.json");
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
+		Filepath source = directory.join("sessions.json");
 		String corrupt = "{recover this history manually";
-		Files.write(source, corrupt.getBytes(StandardCharsets.UTF_8));
+		source.write(corrupt.getBytes(StandardCharsets.UTF_8));
 		SessionStore store = new SessionStore(directory, new Gson());
 		assertTrue(store.load().isEmpty());
 		store.save(Collections.singletonList(session("new", "Fishing", "", 1, 0)));
-		List<Path> backups = new ArrayList<>();
-		try (Stream<Path> files = Files.list(directory))
+		List<Filepath> backups = new ArrayList<>();
+		try (Stream<Filepath> files = directory.walk(1).filter(path -> !path.equals(directory)))
 		{
-			files.filter(path -> path.getFileName().toString().startsWith("sessions.unreadable-")).forEach(backups::add);
+			files.filter(path -> path.getFileName().startsWith("sessions.unreadable-")).forEach(backups::add);
 		}
 		assertEquals(1, backups.size());
-		assertEquals(corrupt, new String(Files.readAllBytes(backups.get(0)), StandardCharsets.UTF_8));
+		assertEquals(corrupt, new String(readBytes(backups.get(0)), StandardCharsets.UTF_8));
 		assertEquals("new", store.load().get(0).getId());
 		store.save(Collections.singletonList(session("newer", "Fishing", "", 2, 0)));
-		try (Stream<Path> files = Files.list(directory))
+		try (Stream<Filepath> files = directory.walk(1).filter(path -> !path.equals(directory)))
 		{
 			assertEquals(2, files.count());
 		}
@@ -124,12 +133,12 @@ public class SessionStoreTest
 	@Test
 	public void successesOnlyCsvLeavesUnknownCountsAndRatesBlank() throws IOException
 	{
-		Path directory = temporary.newFolder().toPath();
-		Path exported = directory.resolve("successes.csv");
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
+		Filepath exported = directory.join("successes.csv");
 		AttemptSession catches = new AttemptSession("only", "Fishing", "", TrackingMethod.SUCCESS_ONLY,
 			1_790_900_000_000L, 1_790_900_000_000L, 42, 0, 0, 0);
 		new SessionStore(directory, new Gson()).exportCsv(Collections.singletonList(catches), exported);
-		String row = Files.readAllLines(exported, StandardCharsets.UTF_8).get(1);
+		String row = readLines(exported).get(1);
 		String[] columns = row.split(",", -1);
 		assertEquals(14, columns.length);
 		assertEquals("", columns[6]);
@@ -149,12 +158,12 @@ public class SessionStoreTest
 		assertEquals("\"'@SUM(1)\"", SessionStore.csvText("@SUM(1)"));
 		assertEquals("\"'\tvalue\"", SessionStore.csvText("\tvalue"));
 		assertEquals("\"line\n\"\"quoted\"\"\"", SessionStore.csvText("line\n\"quoted\""));
-		Path directory = temporary.newFolder().toPath();
-		Path exported = directory.resolve("export.csv");
+		Filepath directory = Filepath.Unchecked.getRooted(temporary.newFolder().toPath());
+		Filepath exported = directory.join("export.csv");
 		new SessionStore(directory, new Gson()).exportCsv(Arrays.asList(
 			session("id", "=1+1", "Lures, \"three\"\nline", 95, 5),
 			session("empty", "Fishing", "", 0, 0)), exported);
-		String csv = new String(Files.readAllBytes(exported), StandardCharsets.UTF_8);
+		String csv = new String(readBytes(exported), StandardCharsets.UTF_8);
 		assertTrue(csv.contains("\"'=1+1\""));
 		assertTrue(csv.contains("\"Lures, \"\"three\"\"\nline\""));
 		assertTrue(csv.contains(",100,95,5,0.95,"));

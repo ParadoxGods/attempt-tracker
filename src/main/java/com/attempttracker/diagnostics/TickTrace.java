@@ -3,29 +3,27 @@ package com.attempttracker.diagnostics;
 import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import net.runelite.client.util.Filepath;
 
 /** Local per-tick trace, called only from the plugin's serial I/O worker. */
 public final class TickTrace implements Closeable
 {
 	private static final int MAX_ROWS = 100_000;
-	private final Path directory;
+	private final Filepath directory;
 	private BufferedWriter writer;
 	private int rows;
-	public TickTrace(Path directory) { this.directory = directory; }
+	public TickTrace(Filepath directory) { this.directory = directory; }
 	public void append(String row) throws IOException
 	{
 		if (writer == null || rows == MAX_ROWS)
 		{
-			close(); Files.createDirectories(directory);
-			Path file = directory.resolve("ticks-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")) + ".csv");
-			writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+			close(); directory.createDirectories();
+			Filepath file = directory.join("ticks-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")) + ".csv");
+			writer = file.openBufferedWriter(StandardOpenOption.CREATE_NEW);
 			writer.write("time_utc,tick,animation,frame,skill,target,xp_delta,inventory_lures,raw_lure_setting,configured_cycle,first_roll_delay,success_messages,eligible,start_tick,timing_result,live_interaction,context_problem,start_message,start_message_tick\r\n"); rows = 0;
 		}
 		writer.write(row); rows++;

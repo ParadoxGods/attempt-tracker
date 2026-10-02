@@ -1,8 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if exist "attempt-tracker-1.1.6-all.jar" (
-  java -ea -jar "attempt-tracker-1.1.6-all.jar" --developer-mode --disable-telemetry --profile attempt-tracker-dev
+if exist "attempt-tracker-1.1.7-all.jar" (
+  java -ea -jar "attempt-tracker-1.1.7-all.jar" --developer-mode --disable-telemetry --profile attempt-tracker-dev
 ) else (
   call gradlew.bat run
 )
