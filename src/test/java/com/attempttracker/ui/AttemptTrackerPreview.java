@@ -56,6 +56,7 @@ public final class AttemptTrackerPreview
         current.minimumFailures = current.maximumFailures = 50; current.loggedMillis = 3_600_000; current.fishingMillis = 3_000_000; current.fishingTicks = 5000;
         FishingSession previous = current.copy(); previous.id = "previous"; previous.startedAt -= 3_600_000; previous.endedAt = time;
         AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
+        panel.onActivate();
         panel.refresh(Arrays.asList(current, previous), "Fishing", "Counting completed 5-tick cycles.", new LureDisplay("3 per catch", "Detected automatically", "Live lure choice"));
 		panel.setSize(new Dimension(225, 1000));
 		for (int i = 0; i < 3; i++)
@@ -91,6 +92,7 @@ public final class AttemptTrackerPreview
 		waitingGraphics.dispose();
         FishingSession variable = current.copy(); variable.minimumFailures = 40; variable.maximumFailures = 55; variable.variableTiming = true;
         AttemptTrackerPanel variablePanel = new AttemptTrackerPanel(() -> {}, () -> {});
+        variablePanel.onActivate();
         variablePanel.refresh(Arrays.asList(variable), "Fishing", "Variable timing: possible range.", new LureDisplay("5 per catch", "Restart harpooning for attempts", "Live lure choice")); variablePanel.setSize(225, 650);
         for (int i = 0; i < 3; i++) { layout(variablePanel); }
         Graphics2D variableGraphics = (Graphics2D) graphics.create(535, 42, 225, 650);

@@ -18,11 +18,118 @@ import static org.junit.Assert.*;
 public class AttemptTrackerPanelTest
 {
 	@Test
+	public void hiddenTickUpdatesLeaveSwingComponentsAloneAndReopenWithLatestData() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
+			panel.refresh(Collections.singletonList(session("one", 2)), "Fishing", "Tick 1");
+			JList<?> list = find(panel, JList.class);
+			AtomicInteger changes = countModelEvents(list);
+			JTextArea details = find(panel, JTextArea.class);
+			AtomicInteger edits = countDocumentEvents(details);
+			panel.onDeactivate();
+			for (int i = 3; i <= 200; i++)
+			{
+				panel.refresh(Collections.singletonList(session("one", i)), "Paused", "Tick " + i,
+					new LureDisplay("5 per catch", "Detected automatically", "Live choice"));
+			}
+			panel.refreshLures(new LureDisplay("None", "No lures available", "No supply"));
+			assertEquals(0, changes.get()); assertEquals(0, edits.get());
+			assertTrue(hasLabel(panel, "2")); assertFalse(hasLabel(panel, "None"));
+			panel.onActivate();
+			assertTrue(hasLabel(panel, "200")); assertTrue(hasLabel(panel, "Paused"));
+			assertTrue(hasLabel(panel, "None")); assertEquals(1, list.getModel().getSize());
+		});
+	}
+
+	@Test
+	public void clockTicksDoNotRebuildHistoryOrChangeSelection() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
+			FishingSession current = session("one", 7), older = session("older", 3);
+			panel.refresh(Arrays.asList(current, older), "Fishing", "Tick 1");
+			JList<?> list = find(panel, JList.class);
+			AtomicInteger modelChanges = countModelEvents(list), selectionChanges = new AtomicInteger();
+			list.addListSelectionListener(event -> selectionChanges.incrementAndGet());
+			current.loggedMillis = 9000; current.fishingMillis = 6000; current.fishingTicks = 10;
+			panel.refresh(Arrays.asList(current, older), "Fishing", "Tick 2");
+			assertEquals(0, modelChanges.get()); assertEquals(0, selectionChanges.get());
+			assertTrue(hasLabel(panel, "00:00:09")); assertTrue(hasLabel(panel, "00:00:06"));
+			assertTrue(hasLabel(panel, "Fishing ticks: 10"));
+			list.setSelectedIndex(1); list.setSelectedIndex(0);
+			assertTrue(hasLabel(panel, "00:00:09"));
+			current.catches++; current.measuredCatches++;
+			panel.refresh(Arrays.asList(current, older), "Fishing", "Tick 3");
+			assertEquals(1, modelChanges.get()); assertTrue(hasLabel(panel, "8"));
+		});
+	}
+
+	@Test
+	public void foldedDetailsAvoidDocumentEditsAndExpandedDetailsDoNotAutoScroll() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
+			JTextArea details = find(panel, JTextArea.class);
+			AtomicInteger edits = countDocumentEvents(details);
+			panel.refresh(Collections.singletonList(session("one", 1)), "Fishing", "Tick 1");
+			panel.refresh(Collections.singletonList(session("one", 1)), "Fishing", "Tick 2");
+			assertEquals(0, edits.get());
+			findToggle(panel, "Details").doClick();
+			assertEquals("Tick 2", details.getText());
+			assertEquals(javax.swing.text.DefaultCaret.NEVER_UPDATE, ((javax.swing.text.DefaultCaret) details.getCaret()).getUpdatePolicy());
+			int before = edits.get();
+			panel.refresh(Collections.singletonList(session("one", 1)), "Fishing", "Tick 2");
+			assertEquals(before, edits.get());
+			panel.refresh(Collections.singletonList(session("one", 1)), "Fishing", "Tick 3");
+			assertEquals("Tick 3", details.getText());
+		});
+	}
+
+	private static AttemptTrackerPanel activePanel(Runnable reset, Runnable export)
+	{
+		AttemptTrackerPanel panel = new AttemptTrackerPanel(reset, export); panel.onActivate(); return panel;
+	}
+	private static AtomicInteger countModelEvents(JList<?> list)
+	{
+		AtomicInteger changes = new AtomicInteger();
+		list.getModel().addListDataListener(new javax.swing.event.ListDataListener()
+		{
+			public void intervalAdded(javax.swing.event.ListDataEvent event) { changes.incrementAndGet(); }
+			public void intervalRemoved(javax.swing.event.ListDataEvent event) { changes.incrementAndGet(); }
+			public void contentsChanged(javax.swing.event.ListDataEvent event) { changes.incrementAndGet(); }
+		});
+		return changes;
+	}
+	private static AtomicInteger countDocumentEvents(JTextArea details)
+	{
+		AtomicInteger edits = new AtomicInteger();
+		details.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
+		{
+			public void insertUpdate(javax.swing.event.DocumentEvent event) { edits.incrementAndGet(); }
+			public void removeUpdate(javax.swing.event.DocumentEvent event) { edits.incrementAndGet(); }
+			public void changedUpdate(javax.swing.event.DocumentEvent event) { edits.incrementAndGet(); }
+		});
+		return edits;
+	}
+	private static JToggleButton findToggle(Container root, String text)
+	{
+		for (Component component : root.getComponents())
+		{
+			if (component instanceof JToggleButton && text.equals(((JToggleButton) component).getText())) { return (JToggleButton) component; }
+			if (component instanceof Container) { JToggleButton match = findToggle((Container) component, text); if (match != null) { return match; } }
+		}
+		return null;
+	}
+	@Test
 	public void liveLureChangesKeepHistoricalSelectionAndFitSidebar() throws Exception
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
-			AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
 			panel.refresh(Arrays.asList(session("current", 1), session("older", 20)), "Fishing", "", new LureDisplay("1 per catch", "Detected automatically", "Live choice"));
 			JList<?> list = find(panel, JList.class); list.setSelectedIndex(1);
 			for (String amount : new String[]{"3 per catch", "5 per catch", "None", "Unknown", "--"})
@@ -43,7 +150,7 @@ public class AttemptTrackerPanelTest
 			FishingSession session = session("partial", 15); session.measuredCatches = 14;
 			session.minimumFailures = session.maximumFailures = 5; session.variableTiming = true;
 			assertEquals("73.7%", AttemptTrackerPanel.rates(session));
-			AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
 			panel.refresh(Collections.singletonList(session), "Paused", "");
 			assertTrue(hasLabel(panel, "73.7%")); assertTrue(hasLabel(panel, "Rate uses 14 of 15 catches"));
 			panel.setSize(225, 1000); for (int i = 0; i < 3; i++) { layout(panel); }
@@ -65,7 +172,7 @@ public class AttemptTrackerPanelTest
 		AtomicInteger callbacks = new AtomicInteger();
 		SwingUtilities.invokeAndWait(() ->
 		{
-			AttemptTrackerPanel panel = new AttemptTrackerPanel(callbacks::incrementAndGet, () -> {});
+			AttemptTrackerPanel panel = activePanel(callbacks::incrementAndGet, () -> {});
 			panel.refresh(Arrays.asList(session("latest", 1), session("older", 2)), "Fishing", "Fishing");
 			JList<?> list = find(panel, JList.class);
 			list.setSelectedIndex(1);
@@ -84,7 +191,7 @@ public class AttemptTrackerPanelTest
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
-			AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
 			panel.refresh(Collections.singletonList(session("one", 1)), "Fishing", "Fishing");
 			panel.refresh(Arrays.asList(session("two", 2), session("one", 1)), "Fishing", "Cooking");
 			JList<?> list = find(panel, JList.class);
@@ -103,7 +210,7 @@ public class AttemptTrackerPanelTest
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
-			AttemptTrackerPanel panel = new AttemptTrackerPanel(() -> {}, () -> {});
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {});
 			panel.refresh(Collections.singletonList(session("one", 950)), "Fishing",
 				"Fishing. Expected rate: 95.0%; within the 95% confidence interval.");
 			panel.setSize(225, 1000);
@@ -121,7 +228,7 @@ public class AttemptTrackerPanelTest
 	public void refreshDispatchesFromGameThreadAndHandlesEmptyHistory() throws Exception
 	{
 		AtomicReference<AttemptTrackerPanel> reference = new AtomicReference<>();
-		SwingUtilities.invokeAndWait(() -> reference.set(new AttemptTrackerPanel(() -> {}, () -> {})));
+		SwingUtilities.invokeAndWait(() -> reference.set(activePanel(() -> {}, () -> {})));
 		reference.get().refresh(Collections.singletonList(session("one", 10)), "Fishing", "Fishing");
 		SwingUtilities.invokeAndWait(() -> assertEquals(1, find(reference.get(), JList.class).getModel().getSize()));
 		reference.get().refresh(Collections.emptyList(), "Fishing", "Waiting");

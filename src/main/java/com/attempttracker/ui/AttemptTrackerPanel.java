@@ -8,7 +8,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Collections;
+import java.util.Objects;
 import javax.swing.*;
+import javax.swing.text.DefaultCaret;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -32,6 +35,12 @@ public final class AttemptTrackerPanel extends PluginPanel
 	private final JList<FishingSession> history = new JList<>(historyModel);
 	private boolean updating;
 	private boolean followingCurrent = true;
+	private boolean active;
+	private List<FishingSession> latestSessions = Collections.emptyList();
+	private String latestState = "Ready";
+	private String latestDiagnostic = "";
+	private LureDisplay latestLures = LureDisplay.waiting();
+	private final JToggleButton detailsToggle = new JToggleButton("Details");
 
 	public AttemptTrackerPanel(Runnable reset, Runnable export)
 	{
@@ -47,7 +56,7 @@ public final class AttemptTrackerPanel extends PluginPanel
 		content.add(Box.createVerticalStrut(9)); content.add(ticks); content.add(Box.createVerticalStrut(17));
 		JButton resetButton = button("Reset session", () -> { followingCurrent = true; reset.run(); }); resetButton.setBackground(new Color(40, 110, 92)); content.add(resetButton); content.add(Box.createVerticalStrut(16));
 		JToggleButton historyToggle = new JToggleButton("Session history"); style(historyToggle); content.add(historyToggle);
-		history.setBackground(ColorScheme.DARKER_GRAY_COLOR); history.setForeground(Color.WHITE); history.setSelectionMode(ListSelectionModel.SINGLE_SELECTION); history.setFixedCellHeight(44);
+		history.setBackground(ColorScheme.DARKER_GRAY_COLOR); history.setForeground(Color.WHITE); history.setSelectionMode(ListSelectionModel.SINGLE_SELECTION); history.setFixedCellHeight(44); history.setFixedCellWidth(200);
 		history.setCellRenderer((list, session, index, selected, focus) ->
 		{
 			JPanel row = vertical(); row.setOpaque(true); row.setBackground(selected ? ColorScheme.MEDIUM_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR); row.setBorder(BorderFactory.createEmptyBorder(5, 6, 5, 6));
@@ -56,14 +65,17 @@ public final class AttemptTrackerPanel extends PluginPanel
 		});
 		JScrollPane historyScroll = new JScrollPane(history); historyScroll.setAlignmentX(Component.LEFT_ALIGNMENT); historyScroll.setVisible(false); historyScroll.setPreferredSize(new Dimension(200, 135)); historyScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135));
 		historyToggle.addActionListener(event -> { historyScroll.setVisible(historyToggle.isSelected()); revalidate(); });
-		history.addListSelectionListener(event -> { if (!updating && !event.getValueIsAdjusting()) { followingCurrent = history.getSelectedIndex() <= 0; showSession(history.getSelectedValue()); } });
+		history.addListSelectionListener(event -> { if (!updating && !event.getValueIsAdjusting()) { followingCurrent = history.getSelectedIndex() <= 0; showSelectedSession(); } });
 		content.add(historyScroll); content.add(Box.createVerticalStrut(7));
-		JToggleButton detailsToggle = new JToggleButton("Details"); style(detailsToggle); content.add(detailsToggle);
+		style(detailsToggle); content.add(detailsToggle);
 		JPanel detailPanel = vertical(); detailPanel.setVisible(false); details.setEditable(false); details.setLineWrap(true); details.setWrapStyleWord(true); details.setColumns(17);
 		details.setOpaque(false); details.setForeground(MUTED); details.setFont(new Font("SansSerif", Font.PLAIN, 10));
+		((DefaultCaret) details.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
 		detailPanel.add(details); detailPanel.add(Box.createVerticalStrut(8)); detailPanel.add(button("Export CSV", export));
-		detailsToggle.addActionListener(event -> { detailPanel.setVisible(detailsToggle.isSelected()); revalidate(); }); content.add(detailPanel); add(content, BorderLayout.NORTH);
+		detailsToggle.addActionListener(event -> { detailPanel.setVisible(detailsToggle.isSelected()); refreshDetails(); revalidate(); }); content.add(detailPanel); add(content, BorderLayout.NORTH);
 	}
+	@Override public void onActivate() { active = true; renderLatest(); }
+	@Override public void onDeactivate() { active = false; }
 	public void refresh(List<FishingSession> sessions, String state, String diagnostic)
 	{
 		refresh(sessions, state, diagnostic, LureDisplay.waiting());
@@ -73,20 +85,52 @@ public final class AttemptTrackerPanel extends PluginPanel
 		List<FishingSession> copies = new ArrayList<>(); for (FishingSession session : sessions) { copies.add(session.copy()); }
 		Runnable update = () ->
 		{
-			String selectedId = history.getSelectedValue() == null ? "" : history.getSelectedValue().id; updating = true;
-			try
-			{
-				status.setText(state); status.setToolTipText(state); details.setText(diagnostic); showLures(lures); historyModel.clear(); int selected = -1;
-				for (int i = 0; i < copies.size(); i++) { historyModel.addElement(copies.get(i)); if (copies.get(i).id.equals(selectedId)) { selected = i; } }
-				if (!copies.isEmpty()) { history.setSelectedIndex(followingCurrent || selected < 0 ? 0 : selected); } showSession(history.getSelectedValue());
-			}
-			finally { updating = false; }
+			latestSessions = copies; latestState = state; latestDiagnostic = diagnostic; latestLures = lures;
+			if (active) { renderLatest(); }
 		};
 		if (SwingUtilities.isEventDispatchThread()) { update.run(); } else { SwingUtilities.invokeLater(update); }
 	}
 	public void refreshLures(LureDisplay lures)
 	{
-		if (SwingUtilities.isEventDispatchThread()) { showLures(lures); } else { SwingUtilities.invokeLater(() -> showLures(lures)); }
+		Runnable update = () -> { latestLures = lures; if (active) { showLures(lures); } };
+		if (SwingUtilities.isEventDispatchThread()) { update.run(); } else { SwingUtilities.invokeLater(update); }
+	}
+	private void renderLatest()
+	{
+		String selectedId = history.getSelectedValue() == null ? "" : history.getSelectedValue().id; updating = true;
+		try
+		{
+			status.setText(latestState); status.setToolTipText(latestState); refreshDetails(); showLures(latestLures);
+			boolean sameIds = historyModel.size() == latestSessions.size();
+			for (int i = 0; sameIds && i < latestSessions.size(); i++) { sameIds = historyModel.get(i).id.equals(latestSessions.get(i).id); }
+			int selected = -1;
+			if (!sameIds) { historyModel.clear(); }
+			for (int i = 0; i < latestSessions.size(); i++)
+			{
+				FishingSession session = latestSessions.get(i);
+				if (!sameIds) { historyModel.addElement(session); }
+				else
+				{
+					FishingSession old = historyModel.get(i);
+					if (old.startedAt != session.startedAt || old.catches != session.catches
+						|| old.minimumFailures != session.minimumFailures || old.maximumFailures != session.maximumFailures) { historyModel.set(i, session); }
+				}
+				if (session.id.equals(selectedId)) { selected = i; }
+			}
+			int index = latestSessions.isEmpty() ? -1 : followingCurrent || selected < 0 ? 0 : selected;
+			if (history.getSelectedIndex() != index) { history.setSelectedIndex(index); }
+			showSelectedSession();
+		}
+		finally { updating = false; }
+	}
+	private void showSelectedSession()
+	{
+		int index = history.getSelectedIndex();
+		if (index >= 0 && index < latestSessions.size()) { showSession(latestSessions.get(index)); }
+	}
+	private void refreshDetails()
+	{
+		if (active && detailsToggle.isSelected() && !Objects.equals(details.getText(), latestDiagnostic)) { details.setText(latestDiagnostic); }
 	}
 	private void showLures(LureDisplay lures)
 	{
@@ -97,13 +141,14 @@ public final class AttemptTrackerPanel extends PluginPanel
 	{
 		if (session == null) { return; }
 		success.setText(count(session.catches)); failure.setText(failures(session)); rate.setText(rates(session));
-		rate.setFont(rate.getFont().deriveFont(session.minimumFailures == session.maximumFailures ? 26f : 18f));
-		failure.setFont(failure.getFont().deriveFont(session.minimumFailures == session.maximumFailures ? 24f : 17f));
+		setFontSize(rate, session.minimumFailures == session.maximumFailures ? 26f : 18f);
+		setFontSize(failure, session.minimumFailures == session.maximumFailures ? 24f : 17f);
 		loggedTime.setText(duration(session.loggedMillis)); fishingTime.setText(duration(session.fishingMillis)); ticks.setText("Fishing ticks: " + count(session.fishingTicks));
 		rangeNote.setText(session.catches != session.measuredCatches ? "Rate uses " + count(session.measuredCatches) + " of " + count(session.catches) + " catches" : session.variableTiming ? "Variable timing: possible range" : "Failures inferred from fishing ticks");
 		rate.setToolTipText("Tracked catches / estimated attempts. Catches outside a tracked run remain in Catch success and are excluded from the rate. Variable timing can produce a range.");
 		failure.setToolTipText("Silent failures follow supported attempt deadlines. Variable lures show possible totals.");
 	}
+	private static void setFontSize(JLabel label, float size) { if (label.getFont().getSize2D() != size) { label.setFont(label.getFont().deriveFont(size)); } }
 	public static String failures(FishingSession session) { return session.minimumFailures == session.maximumFailures ? count(session.minimumFailures) : count(session.minimumFailures) + "-" + count(session.maximumFailures); }
 	public static String rates(FishingSession session)
 	{

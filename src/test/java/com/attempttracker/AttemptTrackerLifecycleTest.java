@@ -3,6 +3,7 @@ package com.attempttracker;
 import com.attempttracker.core.AttemptSession;
 import com.attempttracker.core.AttemptTrackerEngine;
 import com.attempttracker.store.SessionStore;
+import com.attempttracker.store.FishingSessionStore;
 import com.google.gson.Gson;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -29,6 +30,52 @@ public class AttemptTrackerLifecycleTest
 {
 	@Rule
 	public TemporaryFolder temporary = new TemporaryFolder();
+
+	@Test
+	public void slowDiskSaveDoesNotBlockTickPublishingOrClientCallbacks() throws Exception
+	{
+		for (boolean fishing : new boolean[]{false, true})
+		{
+			ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1);
+			CountDownLatch saving = new CountDownLatch(1), release = new CountDownLatch(1);
+			Filepath directory = mock(Filepath.class), file = mock(Filepath.class);
+			when(directory.join("fishing-sessions.json")).thenReturn(file); when(file.getParent()).thenReturn(directory);
+			SessionStore legacyStore = new SessionStore(directory, new Gson());
+			AttemptTrackerPlugin plugin = initialized(legacyStore, worker);
+			Object store = fishing ? new FishingSessionStore(directory, new Gson()) : legacyStore;
+			doAnswer(call ->
+			{
+				saving.countDown(); assertTrue(release.await(3, TimeUnit.SECONDS));
+				throw new java.io.IOException("Simulated slow disk failure");
+			}).when(directory).createDirectories();
+			ClientThread clientThread = mock(ClientThread.class);
+			doAnswer(call -> { ((Runnable) call.getArgument(0)).run(); return null; }).when(clientThread).invoke(any(Runnable.class));
+			set(plugin, "clientThread", clientThread);
+			java.util.concurrent.ExecutorService foreground = java.util.concurrent.Executors.newSingleThreadExecutor();
+			try
+			{
+				java.util.concurrent.Future<?> save = worker.submit(() ->
+				{
+					try { invoke(plugin, fishing ? "saveFishing" : "save", new Class<?>[]{fishing ? FishingSessionStore.class : SessionStore.class, java.util.List.class, long.class}, store, java.util.Collections.emptyList(), 1L); }
+					catch (Exception ex) { throw new AssertionError(ex); }
+				});
+				assertTrue(saving.await(2, TimeUnit.SECONDS));
+				AtomicInteger callbacks = new AtomicInteger();
+				foreground.submit(() ->
+				{
+					try
+					{
+						invoke(plugin, "publish");
+						invoke(plugin, "invokeClient", new Class<?>[]{long.class, Runnable.class}, 1L, (Runnable) callbacks::incrementAndGet);
+					}
+					catch (Exception ex) { throw new AssertionError(ex); }
+				}).get(1, TimeUnit.SECONDS);
+				assertEquals(1, callbacks.get());
+				release.countDown(); save.get(2, TimeUnit.SECONDS);
+			}
+			finally { release.countDown(); foreground.shutdown(); worker.shutdown(); worker.awaitTermination(2, TimeUnit.SECONDS); SwingUtilities.invokeAndWait(() -> {}); }
+		}
+	}
 
 	@Test
 	public void interruptedShutdownWaitLeavesTheWorkerToFinishGracefully() throws Exception

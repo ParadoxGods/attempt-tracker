@@ -113,6 +113,7 @@ public class AttemptTrackerPlugin extends Plugin
 	private ScheduledExecutorService io;
 	private ScheduledFuture<?> pendingSave;
 	private final Object lifecycleLock = new Object();
+	private final Object persistenceLock = new Object();
 	private volatile long generation;
 	private TickTrace trace;
 	private CustomActivity custom;
@@ -133,7 +134,7 @@ public class AttemptTrackerPlugin extends Plugin
 	private boolean cancelled;
 	private volatile boolean running;
 	private String lastAccount = "";
-	private long savedFingerprint;
+	private volatile long savedFingerprint;
 
 	private volatile boolean paused;
 	private volatile String status = "Waiting for a supported activity.";
@@ -151,7 +152,10 @@ public class AttemptTrackerPlugin extends Plugin
 		synchronized (lifecycleLock)
 		{
 		run = ++generation;
-		Filepath directory = getPluginDirectory();
+		final Filepath directory;
+		synchronized (persistenceLock)
+		{
+		directory = getPluginDirectory();
 		store = new SessionStore(directory, gson);
 		try { engine.restore(store.load()); notice = store.getLastLoadWarning(); }
 		catch (IOException ex) { LOG.warn("Unable to load attempt history", ex); notice = "History could not be loaded."; engine.clear(); }
@@ -163,6 +167,7 @@ public class AttemptTrackerPlugin extends Plugin
 			else { fishingSessions.baseline(engine.getSessions()); }
 		}
 		catch (IOException ex) { LOG.warn("Unable to load fishing sessions", ex); notice = "Fishing history could not be loaded."; fishingSessions.restore(null); fishingSessions.baseline(engine.getSessions()); }
+		}
 		ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1, task -> { Thread thread = new Thread(task, "attempt-tracker-io"); thread.setDaemon(true); return thread; });
 		worker.setRemoveOnCancelPolicy(true);
 		worker.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
@@ -951,7 +956,7 @@ public class AttemptTrackerPlugin extends Plugin
 	}
 	private void saveFishing(FishingSessionStore target, List<FishingSession> sessions, long run)
 	{
-		synchronized (lifecycleLock)
+		synchronized (persistenceLock)
 		{
 			if (generation != run || target == null) { return; }
 			try { target.save(sessions); } catch (IOException ex) { reportIoError("Fishing sessions could not be saved", ex, run); savedFingerprint = Long.MIN_VALUE; }
@@ -974,7 +979,7 @@ public class AttemptTrackerPlugin extends Plugin
 	}
 	private void save(SessionStore runStore, List<AttemptSession> sessions, long run)
 	{
-		synchronized (lifecycleLock)
+		synchronized (persistenceLock)
 		{
 			// Loading a new run cannot race an older atomic replacement of the same file.
 			if (generation != run || runStore == null) { return; }
