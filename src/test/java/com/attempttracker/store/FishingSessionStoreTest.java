@@ -13,6 +13,20 @@ import static org.junit.Assert.*;
 public class FishingSessionStoreTest
 {
 	@Rule public TemporaryFolder folder = new TemporaryFolder();
+	@Test public void adaptiveHistoryAndExportRetainSeparateEvidenceAndBounds() throws Exception
+	{
+		Filepath directory = Filepath.Unchecked.getRooted(folder.getRoot().toPath()); FishingSessionStore store = new FishingSessionStore(directory, new Gson());
+		FishingSession session = new FishingSession(); session.catches = 10; session.measuredCatches = 4;
+		session.minimumFailures = session.maximumFailures = 2; session.adaptiveCatches = 6; session.adaptiveFailureUpper = 8; session.adaptiveTiming = true;
+		store.save(Collections.singletonList(session)); FishingSession restored = store.load().get(0);
+		assertEquals(6, restored.adaptiveCatches); assertEquals(8, restored.adaptiveFailureUpper); assertTrue(restored.adaptiveTiming);
+		com.attempttracker.core.FishingSessions book = new com.attempttracker.core.FishingSessions(); book.restore(store.load());
+		assertEquals(session.id, book.current().id); assertEquals(0.5, book.current().rate(false), 0);
+		Filepath csv = directory.join("adaptive.csv"); store.exportCsv(book.snapshots(), csv); String text = readString(csv);
+		assertTrue(text.contains("adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches"));
+		assertTrue(text.contains(",10,4,2,10,0.5,")); assertTrue(text.contains(",6,8,true,10\r\n"));
+		book.reset(); assertEquals(6, book.snapshots().get(1).adaptiveCatches); assertEquals(0, book.current().adaptiveCatches);
+	}
 	@Test public void csvExportAcceptsAFileScopedChooserSelection() throws Exception
 	{
 		Filepath directory = Filepath.Unchecked.getRooted(folder.getRoot().toPath());

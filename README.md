@@ -11,4 +11,4 @@ A simple fishing tracker that shows:
 
 Fishing time pauses when you stop fishing, log out, fill your inventory, or the spot moves. Session totals stay saved until you reset them.
 
-Failed attempts are estimated from fishing timing. One-lure and five-lure modes can show a range when the exact number is uncertain.
+Tracks recognized fishing methods, including altered timing and tick manipulation. Failed attempts are estimated; uncertain timing shows a possible catch-rate range rather than an exact percentage.

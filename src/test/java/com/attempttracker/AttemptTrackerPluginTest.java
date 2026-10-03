@@ -1612,6 +1612,154 @@ public class AttemptTrackerPluginTest
 		method.invoke(object);
 	}
 
+	@Test public void adaptiveTwoTickSharksKeepObservedCatchesAndRateBounds() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true);
+		when(h.config.trackAllFish()).thenReturn(true); when(h.config.sharkLures()).thenReturn(AttemptTrackerConfig.SharkLures.ONE);
+		h.startSharks(); h.tick(0);
+		for (int tick = 1; tick <= 20; tick++)
+		{
+			if (tick % 2 == 0) { h.catchMessage(); }
+			h.tick(tick);
+		}
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(10, session.catches); assertEquals(10, session.rateCatches()); assertTrue(session.adaptiveTiming);
+		assertEquals(0, session.minimumFailures); assertTrue(session.failureUpper() > 0);
+		assertTrue(Double.isFinite(session.rate(false))); assertEquals(1, session.rate(true), 0);
+	}
+	@Test public void incomingHitsBridgeCombatOnlyAfterConfirmedFishingAndStopAfterTwoTicks() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true);
+		h.startSharks(); h.tick(0); h.tick(1);
+		com.attempttracker.core.FishingSessions book = (com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions");
+		net.runelite.api.events.HitsplatApplied hit = new net.runelite.api.events.HitsplatApplied(); hit.setActor(h.player);
+		h.plugin.onHitsplatApplied(hit);
+		when(h.player.getAnimation()).thenReturn(-1); when(h.player.getInteracting()).thenReturn(mock(Player.class));
+		h.interaction(h.player, h.player.getInteracting()); h.tick(2); assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.tick(3); assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.tick(4); assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+		long pausedTicks = book.current().fishingTicks;
+		for (int tick = 5; tick <= 15; tick++) { h.plugin.onHitsplatApplied(hit); h.tick(tick); }
+		assertEquals(pausedTicks, book.current().fishingTicks);
+	}
+	@Test public void alternatingPlayerCombatAndReclicksKeepTwoTickCatchesAndFishingTime() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		when(h.config.sharkLures()).thenReturn(AttemptTrackerConfig.SharkLures.ONE); h.startSharks(); h.tick(0);
+		Player attacker = mock(Player.class);
+		for (int tick = 1; tick <= 20; tick++)
+		{
+			if (tick % 2 == 1)
+			{
+				net.runelite.api.events.HitsplatApplied hit = new net.runelite.api.events.HitsplatApplied(); hit.setActor(h.player); h.plugin.onHitsplatApplied(hit);
+				when(h.player.getInteracting()).thenReturn(attacker); when(h.player.getAnimation()).thenReturn(-1); h.interaction(h.player, attacker);
+			}
+			else
+			{
+				h.clickNpc(h.spot, "Harpoon"); when(h.player.getInteracting()).thenReturn(h.spot);
+				when(h.player.getAnimation()).thenReturn(AnimationID.HUMAN_HARPOON_CRYSTAL);
+				h.interaction(h.player, h.spot); h.startSharks(); h.catchMessage();
+			}
+			h.tick(tick);
+		}
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(10, session.catches); assertEquals(10, session.rateCatches()); assertEquals(20, session.fishingTicks);
+		assertTrue(session.adaptiveTiming); assertTrue(((String)get(h.plugin, "status")).contains("2t interactions"));
+	}
+	@Test public void unrecognizedFishingXpDoesNotBecomeAnAdaptiveFailure() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		when(h.spot.getId()).thenReturn(FishingSpot.KARAMBWAN.getIds()[0]); h.interaction(h.player, h.spot); h.tick(0);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		long upper = session.adaptiveFailureUpper; h.experience.put(Skill.FISHING, 50); h.tick(1);
+		assertEquals(upper, session.adaptiveFailureUpper); assertTrue(Double.isNaN(session.rate(false)));
+	}
+	@Test public void animationPacketBeforeIncomingHitDoesNotAccidentallyStopManipulation() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); h.startSharks(); h.tick(0);
+		when(h.player.getAnimation()).thenReturn(-1);
+		net.runelite.api.events.AnimationChanged animation = new net.runelite.api.events.AnimationChanged(); animation.setActor(h.player); h.plugin.onAnimationChanged(animation);
+		net.runelite.api.events.HitsplatApplied hit = new net.runelite.api.events.HitsplatApplied(); hit.setActor(h.player); h.plugin.onHitsplatApplied(hit);
+		h.tick(1); assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); h.plugin.onHitsplatApplied(hit);
+		h.tick(2); assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+	}
+	@Test public void stackableFishAndOpenBarrelsDoNotPauseJustBecauseAllSlotsAreOccupied() throws Exception
+	{
+		for (boolean barrel : new boolean[]{false, true})
+		{
+			Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+			when(h.spot.getId()).thenReturn(FishingSpot.MINNOW.getIds()[0]); when(h.inventory.count(ItemID.MINNOW)).thenReturn(barrel ? 0 : 100);
+			Item[] full = new Item[28]; java.util.Arrays.fill(full, new Item(ItemID.SHARK, 1)); full[0] = new Item(barrel ? ItemID.FISH_BARREL_OPEN : ItemID.MINNOW, 100);
+			when(h.inventory.getItems()).thenReturn(full); h.interaction(h.player, h.spot); h.tick(0); h.tick(1);
+			assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+			h.chat(ChatMessageType.GAMEMESSAGE, "You don't have enough inventory space to do that."); h.tick(2);
+			assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+		}
+	}
+	@Test public void adaptiveReclickDoesNotLoseClockTimeBetweenInputAndTick() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
+		com.attempttracker.core.FishingSessions book = new com.attempttracker.core.FishingSessions(clock::get); set(h.plugin, "fishingSessions", book);
+		when(h.spot.getId()).thenReturn(FishingSpot.KARAMBWAN.getIds()[0]); h.interaction(h.player, h.spot); h.tick(0);
+		clock.set(200_000_000L); h.clickNpc(h.spot, "Fish"); clock.set(600_000_000L); h.tick(1);
+		assertEquals(600, book.current().fishingMillis);
+		MenuEntry walk = mock(MenuEntry.class); when(walk.getType()).thenReturn(MenuAction.WALK); when(walk.getOption()).thenReturn("Walk here");
+		clock.set(800_000_000L); h.plugin.onMenuOptionClicked(new MenuOptionClicked(walk));
+		clock.set(1_200_000_000L); when(h.player.getAnimation()).thenReturn(-1); h.tick(2);
+		assertEquals(800, book.current().fishingMillis);
+	}
+	@Test public void adaptiveMovementAndSpotDespawnPauseUntilAConfirmedNewInteraction() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		when(h.spot.getId()).thenReturn(FishingSpot.KARAMBWAN.getIds()[0]); h.interaction(h.player, h.spot); h.tick(0);
+		when(h.spot.getWorldLocation()).thenReturn(new WorldPoint(3201, 3201, 0)); h.tick(1);
+		assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.interaction(h.player, h.spot); h.tick(2); assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+		when(h.player.getWorldLocation()).thenReturn(new WorldPoint(3201, 3200, 0)); h.tick(3);
+		assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.interaction(h.player, h.spot); h.tick(4); assertTrue((Boolean)get(h.plugin, "adaptiveFishing"));
+		h.plugin.onNpcDespawned(new NpcDespawned(h.spot)); h.tick(5); assertFalse((Boolean)get(h.plugin, "adaptiveFishing"));
+	}
+	@Test public void allFishOutcomesWorkWithoutChangingLegacySharkFilter() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		when(h.spot.getId()).thenReturn(FishingSpot.KARAMBWAN.getIds()[0]);
+		h.interaction(h.player, h.spot); h.tick(0);
+		h.chat(ChatMessageType.SPAM, "You catch a karambwan."); h.tick(1);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(1, session.catches); assertEquals(1, session.adaptiveCatches); assertTrue(Double.isFinite(session.rate(false)));
+	}
+	@Test public void ordinaryThreeLureTimingIsUnchangedWithAdaptiveEnabled() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		h.liveIslandSharks(); h.startSharks(); h.tick(0);
+		for (int tick = 1; tick <= 19; tick++) { if (tick == 4 || tick == 9 || tick == 19) { h.liveIslandCatch(); } h.tick(tick); }
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(3, session.catches); assertEquals(3, session.measuredCatches); assertEquals(1, session.maximumFailures);
+		assertEquals(0, session.adaptiveCatches); assertEquals(0, session.adaptiveFailureUpper); assertFalse(session.adaptiveTiming);
+		assertEquals(0.75, session.rate(false), 0);
+	}
+	@Test public void adaptiveLogoutResetAndFullInventoryDoNotProjectFutureFailures() throws Exception
+	{
+		Harness h = new Harness(false); when(h.config.adaptiveTiming()).thenReturn(true); when(h.config.trackAllFish()).thenReturn(true);
+		when(h.spot.getId()).thenReturn(FishingSpot.KARAMBWAN.getIds()[0]); h.interaction(h.player, h.spot); h.tick(0);
+		h.chat(ChatMessageType.SPAM, "You catch a karambwan."); h.tick(1);
+		com.attempttracker.core.FishingSessions book = (com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions");
+		long upper = book.current().adaptiveFailureUpper; String id = book.current().id;
+		when(h.client.getGameState()).thenReturn(GameState.LOGIN_SCREEN); h.ticks(2, 20);
+		assertEquals(upper, book.current().adaptiveFailureUpper); assertEquals(id, book.current().id);
+		when(h.client.getGameState()).thenReturn(GameState.LOGGED_IN); when(h.player.getAnimation()).thenReturn(-1); h.tick(21);
+		assertEquals(upper, book.current().adaptiveFailureUpper);
+		invoke(h.plugin, "resetSession"); assertEquals(0, book.current().adaptiveCatches); assertEquals(0, book.current().adaptiveFailureUpper);
+		assertEquals(1, book.snapshots().get(1).adaptiveCatches);
+		when(h.player.getAnimation()).thenReturn(AnimationID.HUMAN_HARPOON_CRYSTAL); h.interaction(h.player, h.spot); h.tick(22);
+		Item[] full = new Item[28]; java.util.Arrays.fill(full, new Item(ItemID.SHARK, 1)); when(h.inventory.getItems()).thenReturn(full);
+		h.tick(23); long stopped = book.current().adaptiveFailureUpper; h.ticks(24, 30);
+		assertEquals(stopped, book.current().adaptiveFailureUpper);
+	}
+
 	private static final class Harness
 	{
 		private final AttemptTrackerPlugin plugin = new AttemptTrackerPlugin();
@@ -1629,6 +1777,9 @@ public class AttemptTrackerPluginTest
 
 		private Harness(boolean fixedTiming) throws Exception
 		{
+			// Preserve the ordinary-only baseline; adaptive fixtures explicitly opt in.
+			when(config.adaptiveTiming()).thenReturn(false);
+			when(config.trackAllFish()).thenReturn(false);
 			when(client.getLocalPlayer()).thenReturn(player);
 			when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 			when(client.getTickCount()).thenAnswer(call -> currentTick);

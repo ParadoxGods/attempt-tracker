@@ -18,6 +18,12 @@ public interface AttemptTrackerConfig extends Config
 	@ConfigItem(keyName = "showOverlay", name = "Show overlay", description = "Show the current fishing session on screen", section = display, position = 0)
 	default boolean showOverlay() { return true; }
 
+	@ConfigItem(keyName = "trackAllFish", name = "Include all fish", description = "Track all recognized fishing outcomes instead of only sharks", section = display, position = 2)
+	default boolean trackAllFish() { return true; }
+
+	@ConfigItem(keyName = "adaptiveTiming", name = "Adaptive fishing timing", description = "Retain percentage bounds for altered or unknown timing. Possible attempt windows are not confirmed failed rolls.", section = display, position = 3)
+	default boolean adaptiveTiming() { return true; }
+
 	@Range(min = 0, max = 100)
 	@ConfigItem(keyName = "expectedRate", name = "Rate hypothesis (%)", description = "Compare the sample interval with this hypothesis. 0 disables comparison. This does not change counts or assert an expected game rate.", section = display, hidden = true, position = 1)
 	default int expectedRate() { return 95; }

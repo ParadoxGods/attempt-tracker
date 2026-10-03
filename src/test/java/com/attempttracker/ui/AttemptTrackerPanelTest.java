@@ -17,6 +17,17 @@ import static org.junit.Assert.*;
 
 public class AttemptTrackerPanelTest
 {
+	@Test public void adaptiveRateAndPossibleFailuresFitAtNormalSidebarWidth() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			FishingSession session = new FishingSession(); session.catches = session.adaptiveCatches = 30; session.adaptiveFailureUpper = 60; session.adaptiveTiming = true;
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Collections.singletonList(session), "Fishing", "2t interactions (rolls unverified)");
+			assertEquals("0-60", AttemptTrackerPanel.failures(session)); assertEquals("33.3%-100.0%", AttemptTrackerPanel.rates(session));
+			assertTrue(hasLabel(panel, "Adaptive timing: possible range"));
+			panel.setSize(225, 900); for (int i = 0; i < 3; i++) { layout(panel); } assertVisibleLabelsFit(panel);
+		});
+	}
 	@Test
 	public void hiddenTickUpdatesLeaveSwingComponentsAloneAndReopenWithLatestData() throws Exception
 	{

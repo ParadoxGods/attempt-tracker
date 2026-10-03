@@ -28,6 +28,7 @@ public final class FishingSessions
 			{
 				if (entry != null && entry.id != null && entry.startedAt > 0 && entry.catches >= 0 && entry.measuredCatches >= 0
 					&& entry.measuredCatches <= entry.catches && entry.minimumFailures >= 0 && entry.maximumFailures >= entry.minimumFailures
+					&& entry.adaptiveCatches >= 0 && entry.adaptiveCatches <= entry.catches - entry.measuredCatches && entry.adaptiveFailureUpper >= 0
 					&& entry.loggedMillis >= 0 && entry.fishingMillis >= 0 && entry.fishingMillis <= entry.loggedMillis && entry.fishingTicks >= 0)
 				{
 					sessions.add(entry.copy()); if (sessions.size() == 200) { break; }
@@ -83,6 +84,11 @@ public final class FishingSessions
 		lastNanos = now; logged = nextLogged; fishing = nextLogged && nextFishing;
 	}
 	public void fishingTick() { current().fishingTicks++; }
+	public void adaptiveSample(long catches, long failureUpper, boolean used)
+	{
+		current().adaptiveCatches = Math.max(0, Math.min(catches, current().catches - current().measuredCatches));
+		current().adaptiveFailureUpper = Math.max(0, failureUpper); current().adaptiveTiming = used;
+	}
 	public void reset()
 	{
 		advance(logged, false); stopVariable(); current().endedAt = System.currentTimeMillis();

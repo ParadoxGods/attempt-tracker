@@ -64,6 +64,10 @@ public final class ActivityMessages
 			return Optional.empty();
 		}
 		String text = normalize(message);
+		if (text.equals("your cormorant returns with its catch."))
+		{
+			return outcome("Fishing: Aerial catch", "FISHING", true, true);
+		}
 		Optional<ActivityOutcome> result = named(FISHING, text, FISH, "Fishing", "FISHING", true, true);
 		if (result.isPresent())
 		{
@@ -168,6 +172,13 @@ public final class ActivityMessages
 		add(names, "Catfish", "catfish");
 		add(names, "Squid", "squid");
 		add(names, "Jumbo squid", "jumbo squid");
+		add(names, "Common tench", "common tench");
+		add(names, "Bluegill", "bluegill");
+		add(names, "Greater siren", "greater siren");
+		add(names, "Mottled eel", "mottled eel");
+		add(names, "Frog spawn", "frog spawn");
+		add(names, "Giant carp", "giant carp");
+		add(names, "Slugling", "slugling", "sluglings");
 		return Collections.unmodifiableMap(names);
 	}
 

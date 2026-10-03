@@ -16,6 +16,14 @@ public class ActivityMessagesTest
 		assertOutcome("You catch an Anglerfish.", "Fishing: Anglerfish", "FISHING", true, true);
 		assertOutcome("You catch 15 Karambwanji.", "Fishing: Karambwanji", "FISHING", true, true);
 	}
+	@Test public void aerialAndQuestOutcomesAreSingleCatches()
+	{
+		assertOutcome("Your cormorant returns with its catch.", "Fishing: Aerial catch", "FISHING", true, true);
+		assertOutcome("You catch a mottled eel!", "Fishing: Mottled eel", "FISHING", true, true);
+		assertOutcome("You catch some frog spawn.", "Fishing: Frog spawn", "FISHING", true, true);
+		assertOutcome("You catch a giant carp.", "Fishing: Giant carp", "FISHING", true, true);
+		assertFalse(ActivityMessages.parse("Your cormorant returns with its catch. Good luck!").isPresent());
+	}
 
 	@Test
 	public void liveFishingExclamationMessagesIdentifySingleSuccessfulActions()
@@ -125,7 +133,7 @@ public class ActivityMessagesTest
 			"You catch a cold.", "You catch a shark lure.", "You catch 2 sharks.",
 			"You catch an extra fish due to your Rada's blessing.",
 			"Your spirit flakes allow you to catch an extra fish.",
-			"Your cormorant returns with its catch.", "You don't have enough inventory space to do that.",
+			"You don't have enough inventory space to do that.",
 			"You attempt to pick the man's pocket.", "You need to empty your coin pouches before you can continue pickpocketing.",
 			"You burn some marrentill in the incense burner.",
 			"You half-cook the karambwan.", "You dry a piece of meat and extract the sinew.",

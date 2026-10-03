@@ -2,7 +2,7 @@
 
 <img src="../icon.png" alt="Attempt Tracker fish and stopwatch icon" width="48" height="48">
 
-Version **1.1.10** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
+Version **1.2.0 development** is a fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
 
 ## Using the plugin
 
@@ -14,7 +14,7 @@ Version **1.1.10** is a simple fishing session tracker for RuneLite. The sidebar
 
 The current session survives logout, world changes, client restarts, and plugin disable/re-enable. Logged-in time includes time spent banking or standing idle; fishing time includes active fishing at a selected spot, even when its attempt schedule is unknown or excluded by the shark filter. Neither clock includes time offline. Timers use a monotonic clock, so changing the system time does not change their elapsed time. A reset pauses fishing until a new fishing interaction or start message.
 
-**Session history** lets you view earlier manual sessions. The **Detected lures** row always shows the live choice, even when viewing an older session. Logging out replaces its amount with `--`. **Details** contains the status/diagnostic text and **Export CSV**. The only visible configuration options are the overlay, diagnostics, and local tick tracing. Changing display or diagnostic settings does not pause fishing.
+**Session history** lets you view earlier manual sessions. The **Detected lures** row always shows the live choice, even when viewing an older session. Logging out replaces its amount with `--`. **Details** contains the status/diagnostic text and **Export CSV**. Visible configuration options control the overlay, inclusion of all fish, adaptive timing, diagnostics, and local tick tracing. Changing overlay or diagnostic settings does not pause fishing.
 
 ## What the counts mean
 
@@ -37,9 +37,25 @@ A missed tick, an impossible catch phase, ambiguous catches, or Fishing XP witho
 
 The plugin remembers a clicked/interacted fishing NPC even when the live interaction clears, checking position, plane, world view, and proximity before using it. NPC 16335 is explicitly mapped to sharks because the tested RuneLite SDK omits it. An empty lure inventory with no tackle box uses the no-lure rule. A tackle box with unknown contents is successes-only. Live consumption verified raw game values 1, 3, and 5 as the selected lure quantities. The plugin reads the game choice before the first catch and ignores old manual lure settings. Changing the game choice interrupts the old attempt schedule while preserving session totals and fishing time; a fresh harpooning start resumes estimates with the newly detected choice. Unrecognized values remain successes-only. The game setting is exposed as [SHARK_LURE_USE_QUANTITY](https://github.com/runelite/runelite/blob/master/runelite-api/src/main/java/net/runelite/api/gameval/VarbitID.java).
 
-Tick manipulation and inherited skilling timers can change the first phase or cadence. This tracker measures ordinary uninterrupted harpooning; it cannot directly observe the server's random rolls. A displayed rate does not by itself confirm or refute a wiki catch probability. Keep level, boosts, gear, and lure mode consistent when studying a rate.
+Tick manipulation and inherited skilling timers can change the first phase or cadence. Supported ordinary harpooning retains its established schedule. Altered or unknown fishing timing uses the adaptive bounds described below; server random rolls are not directly observable. A displayed rate does not by itself confirm or refute a wiki catch probability. Keep level, boosts, gear, and lure mode consistent when studying a rate.
 
 ## History and export
+
+### Adaptive fishing (v1.2.0 development)
+
+All recognized fish are included by default, with an optional shark-only filter. Ordinary shark timing keeps the existing no-lure, one-lure, three-lure and five-lure models. When those schedules are contradicted, the invalidated run's observed catches move into an adaptive sample. Previously completed ordinary runs remain unchanged.
+
+For unknown timing, each potentially active observed game tick permits zero or one catch roll. Catch messages identify successful outcomes; remaining windows permit zero through that many failures. The displayed rate combines ordinary measured catches/failures with these adaptive bounds. For example, 30 observed catches over 90 possible windows permit 0-60 failures and a 33.3%-100.0% rate. This is a logical possibility range under the single-roll-per-tick assumption, not a statistical confidence interval or a measurement of an exact two-tick denominator. Different hidden schedules can yield the same client events. Multiple catch messages in one tick and Fishing XP without a recognized outcome are excluded from the adaptive sample. Bonus fish, inventory quantities and XP totals are not converted into extra rolls.
+
+NPC selection and fishing animations establish activity. Local hitsplats (including zero hits) and item-use/eating transitions can bridge at most two ticks since confirmed fishing. These cues cannot initiate fishing or sustain it indefinitely. Repeated accepted fishing interactions report a descriptive rhythm, such as `2t interactions (rolls unverified)`, without treating clicks or hits as rolls. Walking during fishing, a moving/despawned spot, logout, reset, or an explicit inventory-space stop ends engagement. Stackable minnow/karambwanji catches and open barrels prevent occupied slots alone from proving fishing is blocked; game stop messages still pause tracking. Barrel remaining capacity is not inferred.
+
+The global fishing-spot catalog, the existing animation catalog and a named-spot/action fallback cover recognized fishing engagements. Aerial cormorant returns are supported. Fishing minigame reward collections and methods with no observable recognized outcome are not assigned invented catches or rates. Unknown outcomes and disconnected intervals prevent a universal exact percentage. The rate tooltip identifies catch coverage.
+
+Adaptive state uses constant-size counters plus an eight-interval rhythm buffer. It persists across logout/restarts and is archived only by manual Reset. Disabling adaptive timing retains already saved results. CSV adds `adaptive_catches`, `adaptive_fail_upper`, `adaptive_timing` and `rate_catches`; `measured_catches` continues to identify the ordinary sample and `catch_fail_max` includes the adaptive upper bound. Optional local tick traces add counts of incoming hits, independently captured fishing messages and the observed interaction rhythm, without recording attacker names.
+
+The 1.2.0 development build has 229 passing automated tests, including simulated attack-assisted alternation, unexpected two-tick catches, packet ordering, mixed ordinary/adaptive samples, ambiguous outcomes, pause/reset/history/export, clocks between inputs and ticks, and rate containment for different hidden cadences/phases. The adaptive sidebar was rendered and inspected at 225px. Attack-assisted fishing has not been tested live; the user cannot reproduce the supplied clip. This development branch does not replace the pending stable Plugin Hub hotfix.
+
+Primary observation references: [RuneLite fishing catch messages](https://github.com/runelite/runelite/blob/runelite-parent-1.13.1/runelite-client/src/main/java/net/runelite/client/plugins/fishing/FishingPlugin.java), [spot catalog](https://github.com/runelite/runelite/blob/runelite-parent-1.13.1/runelite-client/src/main/java/net/runelite/client/game/FishingSpot.java), [HitsplatApplied](https://static.runelite.net/runelite-api/apidocs/net/runelite/api/events/HitsplatApplied.html), and the original [shared skilling timer investigation](https://github.com/data-dependent/osrs-guides/blob/master/skilling.md#flinching).
 
 Manual fishing sessions are saved locally in `.runelite/plugin-data/attempt-tracker/fishing-sessions.json`, with up to 200 sessions. CSV exports contain catches, measured catches, minimum/maximum failures and rates, both clocks in milliseconds, and fishing ticks. Rates are proportions from 0 to 1. Unknown rates are blank.
 
@@ -65,16 +81,16 @@ On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
 
 Outputs:
 
-- `build/distributions/attempt-tracker-1.1.10.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
-- `build/libs/attempt-tracker-1.1.10-all.jar`: executable client with the plugin registered.
-- `build/libs/attempt-tracker-1.1.10.jar`: plugin-only JAR for development tooling.
+- `build/distributions/attempt-tracker-1.2.0.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
+- `build/libs/attempt-tracker-1.2.0-all.jar`: executable client with the plugin registered.
+- `build/libs/attempt-tracker-1.2.0.jar`: plugin-only JAR for development tooling.
 - `build/preview/attempt-tracker.png`: sidebar and overlay preview using demonstration data.
 - `build/reports/tests/test/index.html`: test report.
 
 Extract the ZIP and run `start-attempt-tracker.bat`, or launch directly:
 
 ```powershell
-java -ea -jar .\attempt-tracker-1.1.10-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
+java -ea -jar .\attempt-tracker-1.2.0-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
 ```
 
 `-ea` is required for RuneLite's development plugin loader. The executable bundles client dependencies and the launcher, excluding JUnit/Mockito/test classes. The plugin-only JAR does not install itself in a normal client. The initial [Plugin Hub submission](https://github.com/runelite/plugin-hub/pull/17633) was merged; further updates still require RuneLite's review and build process.
@@ -83,7 +99,7 @@ For a Jagex account, use RuneLite's official [Using Jagex Accounts](https://gith
 
 ## Validation
 
-**208 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
+**229 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
 
 Historical **v1.0.4** live test: crystal harpoon, three lures, Fishing 77, start tick 24. Deadlines 28 through 128 produced 17 catches and four inferred failures over 21 attempts. Lure consumption was 51, and Fishing XP was 22 per catch. Another 11 idle ticks added no attempts; logout preserved totals. This verifies that particular three-lure cadence. The one-lure live validation is documented below; it is separate from this older three-lure test.
 

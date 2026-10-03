@@ -63,7 +63,7 @@ public final class AttemptTrackerPreview
 		{
 			layout(panel);
 		}
-		BufferedImage image = new BufferedImage(780, 720, BufferedImage.TYPE_INT_ARGB);
+		BufferedImage image = new BufferedImage(1035, 720, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D graphics = image.createGraphics();
 		graphics.setColor(new Color(25, 28, 34));
 		graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
@@ -97,6 +97,12 @@ public final class AttemptTrackerPreview
         for (int i = 0; i < 3; i++) { layout(variablePanel); }
         Graphics2D variableGraphics = (Graphics2D) graphics.create(535, 42, 225, 650);
         variablePanel.printAll(variableGraphics); variableGraphics.dispose();
+		FishingSession adaptive = new FishingSession(); adaptive.catches = adaptive.adaptiveCatches = 30;
+		adaptive.adaptiveFailureUpper = 60; adaptive.adaptiveTiming = true; adaptive.loggedMillis = 180000; adaptive.fishingMillis = 54000; adaptive.fishingTicks = 90;
+		AttemptTrackerPanel adaptivePanel = new AttemptTrackerPanel(() -> {}, () -> {}); adaptivePanel.onActivate();
+		adaptivePanel.refresh(Arrays.asList(adaptive), "Fishing", "Adaptive timing: possible attempt range. 2t interactions (rolls unverified)", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
+		adaptivePanel.setSize(225, 650); for (int i = 0; i < 3; i++) { layout(adaptivePanel); }
+		Graphics2D adaptiveGraphics = (Graphics2D) graphics.create(790, 42, 225, 650); adaptivePanel.printAll(adaptiveGraphics); adaptiveGraphics.dispose();
 		graphics.dispose();
 		try (OutputStream output = destination.openOutputStream()) { ImageIO.write(image, "png", output); }
 	}

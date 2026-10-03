@@ -113,7 +113,7 @@ public final class AttemptTrackerPanel extends PluginPanel
 				{
 					FishingSession old = historyModel.get(i);
 					if (old.startedAt != session.startedAt || old.catches != session.catches
-						|| old.minimumFailures != session.minimumFailures || old.maximumFailures != session.maximumFailures) { historyModel.set(i, session); }
+						|| old.minimumFailures != session.minimumFailures || old.failureUpper() != session.failureUpper()) { historyModel.set(i, session); }
 				}
 				if (session.id.equals(selectedId)) { selected = i; }
 			}
@@ -141,15 +141,15 @@ public final class AttemptTrackerPanel extends PluginPanel
 	{
 		if (session == null) { return; }
 		success.setText(count(session.catches)); failure.setText(failures(session)); rate.setText(rates(session));
-		setFontSize(rate, session.minimumFailures == session.maximumFailures ? 26f : 18f);
-		setFontSize(failure, session.minimumFailures == session.maximumFailures ? 24f : 17f);
+		setFontSize(rate, session.minimumFailures == session.failureUpper() ? 26f : 18f);
+		setFontSize(failure, session.minimumFailures == session.failureUpper() ? 24f : 17f);
 		loggedTime.setText(duration(session.loggedMillis)); fishingTime.setText(duration(session.fishingMillis)); ticks.setText("Fishing ticks: " + count(session.fishingTicks));
-		rangeNote.setText(session.catches != session.measuredCatches ? "Rate uses " + count(session.measuredCatches) + " of " + count(session.catches) + " catches" : session.variableTiming ? "Variable timing: possible range" : "Failures inferred from fishing ticks");
-		rate.setToolTipText("Tracked catches / estimated attempts. Catches outside a tracked run remain in Catch success and are excluded from the rate. Variable timing can produce a range.");
-		failure.setToolTipText("Silent failures follow supported attempt deadlines. Variable lures show possible totals.");
+		rangeNote.setText(session.adaptiveTiming ? "Adaptive timing: possible range" : session.catches != session.rateCatches() ? "Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches" : session.variableTiming ? "Variable timing: possible range" : "Failures inferred from fishing ticks");
+		rate.setToolTipText("Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches. Adaptive bounds allow zero or one roll per potentially active tick; clicks and hits do not prove rolls. Unobserved or ambiguous outcomes are excluded.");
+		failure.setToolTipText("Silent failures follow supported deadlines. Adaptive timing adds possible failures, not confirmed failed catches.");
 	}
 	private static void setFontSize(JLabel label, float size) { if (label.getFont().getSize2D() != size) { label.setFont(label.getFont().deriveFont(size)); } }
-	public static String failures(FishingSession session) { return session.minimumFailures == session.maximumFailures ? count(session.minimumFailures) : count(session.minimumFailures) + "-" + count(session.maximumFailures); }
+	public static String failures(FishingSession session) { return session.minimumFailures == session.failureUpper() ? count(session.minimumFailures) : count(session.minimumFailures) + "-" + count(session.failureUpper()); }
 	public static String rates(FishingSession session)
 	{
 		double lower = session.rate(false), upper = session.rate(true); return !Double.isFinite(lower) ? "--" : Math.abs(lower - upper) < 0.00001 ? percent(lower) : percent(lower) + "-" + percent(upper);

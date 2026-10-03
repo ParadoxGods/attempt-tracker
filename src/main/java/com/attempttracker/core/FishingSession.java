@@ -16,6 +16,9 @@ public final class FishingSession
 	public long fishingMillis;
 	public long fishingTicks;
 	public boolean variableTiming;
+	public long adaptiveCatches;
+	public long adaptiveFailureUpper;
+	public boolean adaptiveTiming;
 
 	public FishingSession copy()
 	{
@@ -25,13 +28,17 @@ public final class FishingSession
 		copy.minimumFailures = minimumFailures; copy.maximumFailures = maximumFailures;
 		copy.loggedMillis = loggedMillis; copy.fishingMillis = fishingMillis; copy.fishingTicks = fishingTicks;
 		copy.variableTiming = variableTiming;
+		copy.adaptiveCatches = adaptiveCatches; copy.adaptiveFailureUpper = adaptiveFailureUpper; copy.adaptiveTiming = adaptiveTiming;
 		return copy;
 	}
 	public double rate(boolean upper)
 	{
 		// Unanchored catches remain in the total but cannot supply a denominator.
-		if (measuredCatches + maximumFailures == 0) { return Double.NaN; }
-		long failures = upper ? minimumFailures : maximumFailures;
-		return measuredCatches == 0 ? 0 : measuredCatches / ((double) measuredCatches + failures);
+		long successes = rateCatches();
+		if (successes == 0 && maximumFailures == 0) { return Double.NaN; }
+		long failures = upper ? minimumFailures : failureUpper();
+		return successes == 0 ? 0 : successes / ((double) successes + failures);
 	}
+	public long rateCatches() { return measuredCatches + adaptiveCatches; }
+	public long failureUpper() { return adaptiveFailureUpper > Long.MAX_VALUE - maximumFailures ? Long.MAX_VALUE : maximumFailures + adaptiveFailureUpper; }
 }
