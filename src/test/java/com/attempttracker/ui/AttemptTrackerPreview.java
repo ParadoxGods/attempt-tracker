@@ -63,7 +63,7 @@ public final class AttemptTrackerPreview
 		{
 			layout(panel);
 		}
-		BufferedImage image = new BufferedImage(1035, 720, BufferedImage.TYPE_INT_ARGB);
+		BufferedImage image = new BufferedImage(1290, 720, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D graphics = image.createGraphics();
 		graphics.setColor(new Color(25, 28, 34));
 		graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
@@ -103,6 +103,15 @@ public final class AttemptTrackerPreview
 		adaptivePanel.refresh(Arrays.asList(adaptive), "Fishing", "Adaptive timing: possible attempt range. 2t interactions (rolls unverified)", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
 		adaptivePanel.setSize(225, 650); for (int i = 0; i < 3; i++) { layout(adaptivePanel); }
 		Graphics2D adaptiveGraphics = (Graphics2D) graphics.create(790, 42, 225, 650); adaptivePanel.printAll(adaptiveGraphics); adaptiveGraphics.dispose();
+		FishingSession twoTick = new FishingSession(); twoTick.catches = 41; twoTick.twoTickCatches = 40; twoTick.twoTickFailures = 10; twoTick.twoTickTiming = true;
+		twoTick.loggedMillis = 120000; twoTick.fishingMillis = 60000; twoTick.fishingTicks = 100;
+		AttemptTrackerPanel twoTickPanel = new AttemptTrackerPanel(() -> {}, () -> {}); twoTickPanel.onActivate();
+		twoTickPanel.refresh(Arrays.asList(twoTick), "Fishing", "Counting qualified 2t harpoon attempts (inferred).", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
+		twoTickPanel.setSize(225, 650); for (int i = 0; i < 3; i++) { layout(twoTickPanel); }
+		Graphics2D twoTickGraphics = (Graphics2D) graphics.create(1045, 42, 225, 650); twoTickPanel.printAll(twoTickGraphics); twoTickGraphics.dispose();
+		AttemptTrackerOverlay twoTickOverlay = new AttemptTrackerOverlay(() -> twoTick, () -> true, () -> "Fishing");
+		Graphics2D twoTickOverlayGraphics = (Graphics2D) graphics.create(305, 425, 245, 245); twoTickOverlayGraphics.setFont(new Font("SansSerif", Font.PLAIN, 12));
+		twoTickOverlay.render(twoTickOverlayGraphics); twoTickOverlay.render(twoTickOverlayGraphics); twoTickOverlayGraphics.dispose();
 		graphics.dispose();
 		try (OutputStream output = destination.openOutputStream()) { ImageIO.write(image, "png", output); }
 	}

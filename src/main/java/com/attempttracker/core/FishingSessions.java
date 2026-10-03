@@ -28,7 +28,9 @@ public final class FishingSessions
 			{
 				if (entry != null && entry.id != null && entry.startedAt > 0 && entry.catches >= 0 && entry.measuredCatches >= 0
 					&& entry.measuredCatches <= entry.catches && entry.minimumFailures >= 0 && entry.maximumFailures >= entry.minimumFailures
-					&& entry.adaptiveCatches >= 0 && entry.adaptiveCatches <= entry.catches - entry.measuredCatches && entry.adaptiveFailureUpper >= 0
+					&& entry.twoTickCatches >= 0 && entry.twoTickCatches <= entry.catches - entry.measuredCatches
+					&& entry.twoTickFailures >= 0 && entry.twoTickFailures <= Long.MAX_VALUE - entry.twoTickCatches
+					&& entry.adaptiveCatches >= 0 && entry.adaptiveCatches <= entry.catches - entry.measuredCatches - entry.twoTickCatches && entry.adaptiveFailureUpper >= 0
 					&& entry.loggedMillis >= 0 && entry.fishingMillis >= 0 && entry.fishingMillis <= entry.loggedMillis && entry.fishingTicks >= 0)
 				{
 					sessions.add(entry.copy()); if (sessions.size() == 200) { break; }
@@ -86,8 +88,16 @@ public final class FishingSessions
 	public void fishingTick() { current().fishingTicks++; }
 	public void adaptiveSample(long catches, long failureUpper, boolean used)
 	{
-		current().adaptiveCatches = Math.max(0, Math.min(catches, current().catches - current().measuredCatches));
+		current().adaptiveCatches = Math.max(0, Math.min(catches, current().catches - current().measuredCatches - current().twoTickCatches));
 		current().adaptiveFailureUpper = Math.max(0, failureUpper); current().adaptiveTiming = used;
+	}
+	public void twoTickSample(long catches, long failures, boolean focus)
+	{
+		FishingSession current = current();
+		current.twoTickCatches = Math.max(0, Math.min(catches, current.catches - current.measuredCatches));
+		current.twoTickFailures = Math.max(0, Math.min(failures, Long.MAX_VALUE - current.twoTickCatches));
+		current.twoTickTiming = focus;
+		current.adaptiveCatches = Math.min(current.adaptiveCatches, Math.max(0, current.catches - current.measuredCatches - current.twoTickCatches));
 	}
 	public void reset()
 	{

@@ -17,6 +17,26 @@ import static org.junit.Assert.*;
 
 public class AttemptTrackerPanelTest
 {
+	@Test public void focusedTwoTickPercentageIgnoresAdaptiveRangeAndFitsSidebar() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			FishingSession session = session("mixed", 100); session.measuredCatches = 10;
+			session.adaptiveCatches = 50; session.adaptiveFailureUpper = 100; session.adaptiveTiming = true;
+			session.twoTickCatches = 40; session.twoTickFailures = 10; session.twoTickTiming = true;
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Collections.singletonList(session), "Fishing", "");
+			assertEquals("10", AttemptTrackerPanel.failures(session)); assertEquals("80.0%", AttemptTrackerPanel.rates(session));
+			assertTrue(hasLabel(panel, "Inferred 2t: 40 of 100 catches")); assertFalse(hasLabel(panel, "Adaptive timing: possible range"));
+			javax.swing.JLabel note = findLabel(panel, "Inferred 2t: 40 of 100 catches");
+			assertTrue(note.getToolTipText().contains("50 qualified, inferred attempts")); assertTrue(note.getToolTipText().contains("Server rolls are not directly verified"));
+			JList<?> list = find(panel, JList.class); AtomicInteger changes = countModelEvents(list);
+			session.loggedMillis = 1000; session.fishingMillis = 1000; panel.refresh(Collections.singletonList(session), "Fishing", "");
+			assertEquals(0, changes.get());
+			session.twoTickFailures = 11; panel.refresh(Collections.singletonList(session), "Fishing", ""); assertEquals(1, changes.get());
+			assertEquals("11", AttemptTrackerPanel.failures((FishingSession) list.getModel().getElementAt(0)));
+			panel.setSize(225, 900); for (int i = 0; i < 3; i++) { layout(panel); } assertVisibleLabelsFit(panel);
+		});
+	}
 	@Test public void adaptiveRateAndPossibleFailuresFitAtNormalSidebarWidth() throws Exception
 	{
 		SwingUtilities.invokeAndWait(() ->
@@ -176,6 +196,15 @@ public class AttemptTrackerPanelTest
 			if (component instanceof Container && hasLabel((Container) component, text)) { return true; }
 		}
 		return false;
+	}
+	private static javax.swing.JLabel findLabel(Container root, String text)
+	{
+		for (Component component : root.getComponents())
+		{
+			if (component instanceof javax.swing.JLabel && text.equals(((javax.swing.JLabel) component).getText())) { return (javax.swing.JLabel) component; }
+			if (component instanceof Container) { javax.swing.JLabel found = findLabel((Container) component, text); if (found != null) { return found; } }
+		}
+		return null;
 	}
 	@Test
 	public void tickRefreshPreservesHistorySelectionAndResetOnlyRunsOnClick() throws Exception

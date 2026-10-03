@@ -13,6 +13,24 @@ import static org.junit.Assert.*;
 public class FishingSessionStoreTest
 {
 	@Rule public TemporaryFolder folder = new TemporaryFolder();
+	@Test public void twoTickHistoryAndCsvRetainFocusedSampleAndLegacyColumns() throws Exception
+	{
+		Filepath directory = Filepath.Unchecked.getRooted(folder.getRoot().toPath()); FishingSessionStore store = new FishingSessionStore(directory, new Gson());
+		FishingSession session = new FishingSession(); session.catches = 100; session.measuredCatches = 10; session.minimumFailures = session.maximumFailures = 5;
+		session.adaptiveCatches = 50; session.adaptiveFailureUpper = 100; session.adaptiveTiming = true;
+		session.twoTickCatches = 40; session.twoTickFailures = 10; session.twoTickTiming = true;
+		store.save(Collections.singletonList(session)); FishingSession restored = store.load().get(0);
+		assertEquals(40, restored.twoTickCatches); assertEquals(10, restored.twoTickFailures); assertTrue(restored.twoTickTiming);
+		assertEquals(0.8, restored.rate(false), 0);
+		Filepath csv = directory.join("two-tick.csv"); store.exportCsv(Collections.singletonList(restored), csv); String text = readString(csv);
+		assertTrue(text.contains("rate_catches,two_tick_catches,two_tick_failures,two_tick_timing\r\n"));
+		assertTrue(text.contains(",100,10,10,10,0.8,0.8,")); assertTrue(text.contains(",50,100,true,40,40,10,true\r\n"));
+		// Before the new fields existed, persisted JSON contained only the strict and adaptive cohorts.
+		directory.join("fishing-sessions.json").write("[{\"id\":\"legacy\",\"startedAt\":1,\"catches\":8,\"measuredCatches\":8}]");
+		com.attempttracker.core.FishingSessions book = new com.attempttracker.core.FishingSessions(); book.restore(store.load());
+		assertEquals("legacy", book.current().id); assertEquals(0, book.current().twoTickAttempts()); assertFalse(book.current().twoTickTiming);
+		assertEquals(1, book.current().rate(false), 0);
+	}
 	@Test public void adaptiveHistoryAndExportRetainSeparateEvidenceAndBounds() throws Exception
 	{
 		Filepath directory = Filepath.Unchecked.getRooted(folder.getRoot().toPath()); FishingSessionStore store = new FishingSessionStore(directory, new Gson());
@@ -24,7 +42,7 @@ public class FishingSessionStoreTest
 		assertEquals(session.id, book.current().id); assertEquals(0.5, book.current().rate(false), 0);
 		Filepath csv = directory.join("adaptive.csv"); store.exportCsv(book.snapshots(), csv); String text = readString(csv);
 		assertTrue(text.contains("adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches"));
-		assertTrue(text.contains(",10,4,2,10,0.5,")); assertTrue(text.contains(",6,8,true,10\r\n"));
+		assertTrue(text.contains(",10,4,2,10,0.5,")); assertTrue(text.contains(",6,8,true,10,0,0,false\r\n"));
 		book.reset(); assertEquals(6, book.snapshots().get(1).adaptiveCatches); assertEquals(0, book.current().adaptiveCatches);
 	}
 	@Test public void csvExportAcceptsAFileScopedChooserSelection() throws Exception

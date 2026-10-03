@@ -8,6 +8,43 @@ import static org.junit.Assert.*;
 
 public class FishingSessionsTest
 {
+	@Test public void focusedTwoTickSampleExcludesEarlierAdaptiveWindows()
+	{
+		FishingSessions book = new FishingSessions(); FishingSession session = book.current();
+		session.catches = 100; session.measuredCatches = 10; session.minimumFailures = session.maximumFailures = 5;
+		book.adaptiveSample(50, 100, true); book.twoTickSample(40, 10, true);
+		assertEquals(100, session.catches); assertEquals(50, session.twoTickAttempts());
+		assertEquals(40, session.rateCatches()); assertEquals(10, session.rateFailureLower()); assertEquals(10, session.failureUpper());
+		assertEquals(0.8, session.rate(false), 0); assertEquals(0.8, session.rate(true), 0);
+		book.twoTickSample(40, 10, false);
+		assertEquals(100, session.rateCatches()); assertEquals(15, session.rateFailureLower()); assertEquals(115, session.failureUpper());
+		assertEquals(100.0 / 215, session.rate(false), 0.000001); assertEquals(100.0 / 115, session.rate(true), 0.000001);
+	}
+	@Test public void twoTickRestoreAndResetKeepCohortWithoutInventingEmptyRate()
+	{
+		FishingSessions book = new FishingSessions(); book.current().catches = 45; book.twoTickSample(40, 10, true);
+		FishingSessions resumed = new FishingSessions(); resumed.restore(book.snapshots());
+		assertEquals(40, resumed.current().twoTickCatches); assertEquals(10, resumed.current().twoTickFailures);
+		assertTrue(resumed.current().twoTickTiming); assertEquals(0.8, resumed.current().rate(false), 0);
+		resumed.reset(); assertEquals(40, resumed.snapshots().get(1).twoTickCatches); assertEquals(10, resumed.snapshots().get(1).twoTickFailures);
+		assertEquals(0, resumed.current().twoTickAttempts()); assertFalse(resumed.current().twoTickTiming);
+		resumed.twoTickSample(0, 0, true); assertTrue(Double.isNaN(resumed.current().rate(false)));
+		resumed.twoTickSample(0, 2, true); assertEquals(0, resumed.current().rate(false), 0);
+	}
+	@Test public void cohortCatchesCannotOverlapAndCorruptOrOverflowingHistoryIsRejected()
+	{
+		FishingSessions book = new FishingSessions(); book.current().catches = 50; book.current().measuredCatches = 5;
+		book.adaptiveSample(45, 100, true); book.twoTickSample(40, 10, true); assertEquals(5, book.current().adaptiveCatches);
+		book.adaptiveSample(45, 100, true); assertEquals(5, book.current().adaptiveCatches);
+		FishingSession overlapping = book.current().copy(); overlapping.id = "overlap"; overlapping.adaptiveCatches = 6;
+		FishingSession overflowing = book.current().copy(); overflowing.id = "overflow"; overflowing.twoTickFailures = Long.MAX_VALUE;
+		FishingSession valid = book.current().copy();
+		book.restore(Arrays.asList(overlapping, overflowing, valid)); assertEquals(1, book.snapshots().size()); assertEquals(valid.id, book.current().id);
+		FishingSession huge = new FishingSession(); huge.twoTickCatches = Long.MAX_VALUE; huge.twoTickFailures = 1;
+		assertEquals(Long.MAX_VALUE, huge.twoTickAttempts());
+		huge.twoTickTiming = false; huge.minimumFailures = huge.maximumFailures = Long.MAX_VALUE; huge.adaptiveFailureUpper = Long.MAX_VALUE;
+		assertEquals(Long.MAX_VALUE, huge.rateFailureLower()); assertEquals(Long.MAX_VALUE, huge.failureUpper());
+	}
 	@Test public void unanchoredCatchDoesNotHideRateForMeasuredSample()
 	{
 		FishingSession session = new FishingSession(); session.catches = 15; session.measuredCatches = 14;

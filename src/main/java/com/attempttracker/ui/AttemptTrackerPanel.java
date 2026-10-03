@@ -113,7 +113,9 @@ public final class AttemptTrackerPanel extends PluginPanel
 				{
 					FishingSession old = historyModel.get(i);
 					if (old.startedAt != session.startedAt || old.catches != session.catches
-						|| old.minimumFailures != session.minimumFailures || old.failureUpper() != session.failureUpper()) { historyModel.set(i, session); }
+						|| old.rateFailureLower() != session.rateFailureLower() || old.failureUpper() != session.failureUpper()
+						|| old.twoTickTiming != session.twoTickTiming || old.twoTickCatches != session.twoTickCatches
+						|| old.twoTickFailures != session.twoTickFailures) { historyModel.set(i, session); }
 				}
 				if (session.id.equals(selectedId)) { selected = i; }
 			}
@@ -141,15 +143,17 @@ public final class AttemptTrackerPanel extends PluginPanel
 	{
 		if (session == null) { return; }
 		success.setText(count(session.catches)); failure.setText(failures(session)); rate.setText(rates(session));
-		setFontSize(rate, session.minimumFailures == session.failureUpper() ? 26f : 18f);
-		setFontSize(failure, session.minimumFailures == session.failureUpper() ? 24f : 17f);
+		setFontSize(rate, session.rateFailureLower() == session.failureUpper() ? 26f : 18f);
+		setFontSize(failure, session.rateFailureLower() == session.failureUpper() ? 24f : 17f);
 		loggedTime.setText(duration(session.loggedMillis)); fishingTime.setText(duration(session.fishingMillis)); ticks.setText("Fishing ticks: " + count(session.fishingTicks));
-		rangeNote.setText(session.adaptiveTiming ? "Adaptive timing: possible range" : session.catches != session.rateCatches() ? "Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches" : session.variableTiming ? "Variable timing: possible range" : "Failures inferred from fishing ticks");
-		rate.setToolTipText("Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches. Adaptive bounds allow zero or one roll per potentially active tick; clicks and hits do not prove rolls. Unobserved or ambiguous outcomes are excluded.");
-		failure.setToolTipText("Silent failures follow supported deadlines. Adaptive timing adds possible failures, not confirmed failed catches.");
+		rangeNote.setText(session.twoTickTiming ? "Inferred 2t: " + count(session.twoTickCatches) + " of " + count(session.catches) + " catches" : session.adaptiveTiming ? "Adaptive timing: possible range" : session.catches != session.rateCatches() ? "Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches" : session.variableTiming ? "Variable timing: possible range" : "Failures inferred from fishing ticks");
+		String twoTickNote = "2t sample uses " + count(session.twoTickAttempts()) + " qualified, inferred attempts: " + count(session.twoTickCatches) + " catches and " + count(session.twoTickFailures) + " failures. Server rolls are not directly verified. Unqualified cycles and earlier adaptive windows are excluded from this percentage.";
+		rate.setToolTipText(session.twoTickTiming ? twoTickNote : "Rate uses " + count(session.rateCatches()) + " of " + count(session.catches) + " catches. Adaptive bounds allow zero or one roll per potentially active tick; clicks and hits do not prove rolls. Unobserved or ambiguous outcomes are excluded.");
+		failure.setToolTipText(session.twoTickTiming ? twoTickNote : "Silent failures follow supported deadlines. Adaptive timing adds possible failures, not confirmed failed catches.");
+		rangeNote.setToolTipText(rate.getToolTipText());
 	}
 	private static void setFontSize(JLabel label, float size) { if (label.getFont().getSize2D() != size) { label.setFont(label.getFont().deriveFont(size)); } }
-	public static String failures(FishingSession session) { return session.minimumFailures == session.failureUpper() ? count(session.minimumFailures) : count(session.minimumFailures) + "-" + count(session.failureUpper()); }
+	public static String failures(FishingSession session) { return session.rateFailureLower() == session.failureUpper() ? count(session.rateFailureLower()) : count(session.rateFailureLower()) + "-" + count(session.failureUpper()); }
 	public static String rates(FishingSession session)
 	{
 		double lower = session.rate(false), upper = session.rate(true); return !Double.isFinite(lower) ? "--" : Math.abs(lower - upper) < 0.00001 ? percent(lower) : percent(lower) + "-" + percent(upper);

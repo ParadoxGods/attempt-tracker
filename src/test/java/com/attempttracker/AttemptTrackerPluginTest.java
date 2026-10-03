@@ -1760,6 +1760,145 @@ public class AttemptTrackerPluginTest
 		assertEquals(stopped, book.current().adaptiveFailureUpper);
 	}
 
+	@Test public void qualifiedTwoTickAdapterCountsFiftyAttemptsAndFortyCatchesAtEightyPercent() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0);
+		for (int roll = 1; roll <= 50; roll++)
+		{
+			h.twoTickFlinch(roll % 2 == 0); h.tick(roll * 2 - 1);
+			h.twoTickFish(roll % 5 != 0); h.tick(roll * 2);
+		}
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(41, session.catches); assertEquals(40, session.twoTickCatches); assertEquals(10, session.twoTickFailures);
+		assertEquals(50, session.twoTickAttempts()); assertTrue(session.twoTickTiming);
+		assertEquals(0.8, session.rate(false), 0); assertEquals(0.8, session.rate(true), 0);
+		assertEquals(0, session.adaptiveFailureUpper); assertEquals(0, session.measuredCatches);
+	}
+	@Test public void twoTickPacketOrderingAndDuplicateHitsDoNotChangeSilentFailureCount() throws Exception
+	{
+		for (boolean reverse : new boolean[]{false, true})
+		{
+			Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0);
+			h.twoTickFlinch(reverse); h.twoTickFlinch(!reverse); h.tick(1);
+			h.twoTickFish(false); h.tick(2);
+			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+			assertEquals(1, session.twoTickFailures); assertEquals(0, session.twoTickCatches); assertEquals(0, session.rate(false), 0);
+		}
+	}
+	@Test public void ordinaryFishingWithFastWeaponAndClearedFacingKeepsItsLureSchedule() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); when(h.config.sharkFirstRollDelay()).thenReturn(0);
+		when(h.client.getVarbitValue(VarbitID.SHARK_LURE_USE_QUANTITY)).thenReturn(3); h.startSharks(); h.ticks(0, 3);
+		h.catchMessage(); when(h.player.getInteracting()).thenReturn(null); h.interaction(h.player, null); h.tick(4);
+		h.ticks(5, 14, 9);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(2, session.catches); assertEquals(2, session.measuredCatches); assertEquals(1, session.minimumFailures);
+		assertEquals(0, session.twoTickAttempts()); assertFalse(session.twoTickTiming); assertEquals(2.0 / 3, session.rate(false), 0);
+	}
+	@Test public void stationaryGroundClearingCueKeepsQualifiedTwoTickClockAndSample() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); when(h.worldView.getId()).thenReturn(-1);
+		when(h.worldView.getBaseX()).thenReturn(3200); when(h.worldView.getBaseY()).thenReturn(3200); when(h.worldView.getPlane()).thenReturn(0);
+		when(h.worldView.getSizeX()).thenReturn(104); when(h.worldView.getSizeY()).thenReturn(104);
+		h.twoTickFish(true); h.tick(0);
+		MenuEntry walk = mock(MenuEntry.class); when(walk.getType()).thenReturn(MenuAction.WALK); when(walk.getOption()).thenReturn("Walk here");
+		when(walk.getWorldViewId()).thenReturn(-1); when(walk.getParam0()).thenReturn(0); when(walk.getParam1()).thenReturn(0);
+		h.plugin.onMenuOptionClicked(new MenuOptionClicked(walk)); h.twoTickFlinch(false); h.tick(1); h.twoTickFish(false); h.tick(2);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(1, session.twoTickFailures); assertEquals(2, session.fishingTicks);
+	}
+	@Test public void missingFishingClickAutoRetaliateOffAndSlowWeaponNeverCreateTwoTickFailures() throws Exception
+	{
+		for (String broken : new String[]{"missing", "retaliate", "weapon", "poison", "attack", "outgoing"})
+		{
+			Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0);
+			if (broken.equals("retaliate")) { when(h.client.getVarpValue(net.runelite.api.gameval.VarPlayerID.OPTION_NODEF)).thenReturn(1); }
+			if (broken.equals("weapon")) { when(h.itemManager.getItemStats(1234)).thenReturn(new net.runelite.client.game.ItemStats(true, 0, 0, net.runelite.client.game.ItemEquipmentStats.builder().aspeed(5).build())); }
+			if (broken.equals("attack"))
+			{
+				MenuEntry entry = mock(MenuEntry.class); when(entry.getType()).thenReturn(MenuAction.PLAYER_FIRST_OPTION); when(entry.getOption()).thenReturn("Attack");
+				h.plugin.onMenuOptionClicked(new MenuOptionClicked(entry));
+			}
+			h.twoTickFlinch(false, broken.equals("poison") ? net.runelite.api.HitsplatID.POISON : net.runelite.api.HitsplatID.BLOCK_ME);
+			if (broken.equals("outgoing"))
+			{
+				when(h.player.getAnimation()).thenReturn(426); net.runelite.api.events.AnimationChanged animation = new net.runelite.api.events.AnimationChanged(); animation.setActor(h.player); h.plugin.onAnimationChanged(animation);
+			}
+			h.tick(1); if (!broken.equals("missing")) { h.twoTickFish(false); } h.tick(2);
+			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+			assertEquals(broken, 0, session.twoTickAttempts()); assertFalse(broken, session.twoTickTiming);
+		}
+	}
+	@Test public void twoTickFinalInventoryFillingCatchRemainsACompletedAttemptAndPauses() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1);
+		long before = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current().fishingTicks;
+		h.twoTickFish(true); Item[] full = new Item[28]; java.util.Arrays.fill(full, new Item(ItemID.SHARK, 1)); when(h.inventory.getItems()).thenReturn(full);
+		h.animation(-1);
+		h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); h.tick(2); h.ticks(3, 10);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(2, session.catches); assertEquals(1, session.twoTickCatches); assertEquals(1, session.twoTickAttempts());
+		assertEquals(before + 1, session.fishingTicks);
+		assertFalse(((com.attempttracker.core.TwoTickFishingTracker)get(h.plugin, "twoTickTracker")).isActive());
+	}
+	@Test public void twoTickRequiresAcceptedHarpoonRatherThanStaleAnimationOrOtherFishingStart() throws Exception
+	{
+		for (String evidence : new String[]{"stale", "line", "fresh", "stopped"})
+		{
+			Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1);
+			when(h.player.getAnimation()).thenReturn(AnimationID.HUMAN_HARPOON_CRYSTAL); when(h.player.getInteracting()).thenReturn(h.spot);
+			h.interaction(h.player, h.spot);
+			if (evidence.equals("line")) { h.chat(ChatMessageType.SPAM, "You cast out your line."); }
+			if (evidence.equals("fresh")) { h.animation(AnimationID.HUMAN_HARPOON_CRYSTAL); }
+			if (evidence.equals("stopped")) { h.startSharks(); h.animation(-1); }
+			when(h.player.getInteracting()).thenReturn(null); h.interaction(h.player, null); h.tick(2);
+			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+			assertEquals(evidence, evidence.equals("fresh") || evidence.equals("stopped") ? 1 : 0, session.twoTickFailures);
+		}
+	}
+	@Test public void twoTickRefusalsAndCompetingDueAnimationsNeverBecomeFailedRolls() throws Exception
+	{
+		for (String refusal : new String[]{"You don't have enough bait.", "You don't have enough shark lures.", "Your inventory is too full to hold any more fish.", "attack"})
+		{
+			Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1);
+			h.twoTickFish(false);
+			if (refusal.equals("attack")) { h.animation(426); h.animation(-1); }
+			else { h.chat(ChatMessageType.GAMEMESSAGE, refusal); }
+			h.tick(2);
+			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+			assertEquals(refusal, 0, session.twoTickAttempts());
+		}
+	}
+	@Test public void twoTickFinalCatchAndStopChatPacketOrderHaveIdenticalCounts() throws Exception
+	{
+		for (boolean stopFirst : new boolean[]{false, true})
+		{
+			Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1); h.twoTickFish(false);
+			if (stopFirst) { h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); }
+			h.catchMessage(); h.animation(-1);
+			if (!stopFirst) { h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); }
+			h.tick(2);
+			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+			assertEquals(1, session.twoTickCatches); assertEquals(0, session.twoTickFailures); assertEquals(1, session.twoTickAttempts());
+		}
+	}
+	@Test public void twoTickCompletedCatchSurvivesLureExhaustionAndAccessoryChargeChange() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1);
+		h.twoTickFish(true); when(h.inventory.count(ItemID.SHARK_LURE)).thenReturn(0); when(h.inventory.getItems()).thenReturn(new Item[]{new Item(ItemID.SHARK, 1)});
+		ItemContainer worn = h.client.getItemContainer(InventoryID.WORN);
+		when(worn.getItems()).thenReturn(new Item[]{new Item(1234, 1), new Item(5678, 1)}); h.animation(-1); h.tick(2);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(1, session.twoTickCatches); assertEquals(1, session.twoTickAttempts()); assertEquals(1.0, session.rate(false), 0);
+	}
+	@Test public void twoTickOutOfPhaseCatchRollsBackLatestSegmentButKeepsObservedCatches() throws Exception
+	{
+		Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1); h.twoTickFish(false); h.tick(2);
+		h.twoTickFish(true); h.tick(3);
+		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
+		assertEquals(2, session.catches); assertEquals(0, session.twoTickAttempts()); assertTrue(Double.isNaN(session.rate(false)));
+	}
+
 	private static final class Harness
 	{
 		private final AttemptTrackerPlugin plugin = new AttemptTrackerPlugin();
@@ -1835,6 +1974,40 @@ public class AttemptTrackerPluginTest
 			when(config.customAnimations()).thenReturn(Integer.toString(AnimationID.HUMAN_HARPOON_CRYSTAL));
 			when(config.customCycle()).thenReturn(5);
 			set(plugin, "custom", new CustomActivity(config));
+		}
+		private void configureTwoTick()
+		{
+			when(config.adaptiveTiming()).thenReturn(true); when(config.trackAllFish()).thenReturn(true); when(config.autoDetectLures()).thenReturn(true);
+			ItemContainer worn = mock(ItemContainer.class); when(client.getItemContainer(InventoryID.WORN)).thenReturn(worn);
+			when(worn.getItem(net.runelite.api.EquipmentInventorySlot.WEAPON.getSlotIdx())).thenReturn(new Item(1234, 1)); when(worn.getItems()).thenReturn(new Item[]{new Item(1234, 1)});
+			when(itemManager.getItemStats(1234)).thenReturn(new net.runelite.client.game.ItemStats(true, 0, 0, net.runelite.client.game.ItemEquipmentStats.builder().aspeed(3).build()));
+			when(client.getVarpValue(net.runelite.api.gameval.VarPlayerID.OPTION_NODEF)).thenReturn(0); when(client.getVarpValue(net.runelite.api.gameval.VarPlayerID.COM_MODE)).thenReturn(1);
+			when(client.getVarbitValue(VarbitID.COMBAT_WEAPON_CATEGORY)).thenReturn(7);
+			net.runelite.api.EnumComposition categories = mock(net.runelite.api.EnumComposition.class); when(client.getEnum(net.runelite.api.EnumID.WEAPON_STYLES)).thenReturn(categories); when(categories.getIntValue(7)).thenReturn(100);
+			net.runelite.api.EnumComposition styles = mock(net.runelite.api.EnumComposition.class); when(client.getEnum(100)).thenReturn(styles); when(styles.getIntVals()).thenReturn(new int[]{1001,1001,0,1001});
+			net.runelite.api.StructComposition style = mock(net.runelite.api.StructComposition.class); when(client.getStructComposition(1001)).thenReturn(style); when(style.getStringValue(net.runelite.api.ParamID.ATTACK_STYLE_NAME)).thenReturn("Ranging");
+		}
+		private void twoTickFish(boolean caught)
+		{
+			when(player.getAnimation()).thenReturn(AnimationID.HUMAN_HARPOON_CRYSTAL); when(player.getInteracting()).thenReturn(spot);
+			clickNpc(spot, "Harpoon"); interaction(player, spot); startSharks(); if (caught) { catchMessage(); }
+			when(player.getInteracting()).thenReturn(null); interaction(player, null);
+		}
+		private void twoTickFlinch(boolean reverse) { twoTickFlinch(reverse, net.runelite.api.HitsplatID.BLOCK_ME); }
+		private void animation(int animation)
+		{
+			when(player.getAnimation()).thenReturn(animation);
+			net.runelite.api.events.AnimationChanged event = new net.runelite.api.events.AnimationChanged(); event.setActor(player); plugin.onAnimationChanged(event);
+		}
+		private void twoTickFlinch(boolean reverse, int type)
+		{
+			when(player.getAnimation()).thenReturn(-1);
+			net.runelite.api.events.AnimationChanged animation = new net.runelite.api.events.AnimationChanged(); animation.setActor(player); plugin.onAnimationChanged(animation);
+			Player attacker = mock(Player.class); when(player.getInteracting()).thenReturn(attacker);
+			net.runelite.api.Hitsplat hit = mock(net.runelite.api.Hitsplat.class); when(hit.getHitsplatType()).thenReturn(type); when(hit.getAmount()).thenReturn(0);
+			net.runelite.api.events.HitsplatApplied event = new net.runelite.api.events.HitsplatApplied(); event.setActor(player); event.setHitsplat(hit);
+			if (reverse) { interaction(player, attacker); plugin.onHitsplatApplied(event); }
+			else { plugin.onHitsplatApplied(event); interaction(player, attacker); }
 		}
 
 		private void chat(ChatMessageType type, String text)

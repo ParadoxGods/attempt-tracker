@@ -53,19 +53,21 @@ public final class FishingSessionStore
 	}
 	public void exportCsv(List<FishingSession> sessions, Filepath destination) throws IOException
 	{
-		StringBuilder csv = new StringBuilder("session_id,started_at_utc,ended_at_utc,catch_success,measured_catches,catch_fail_min,catch_fail_max,catch_rate_min,catch_rate_max,logged_in_ms,fishing_ms,fishing_ticks,variable_timing,adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches\r\n");
+		StringBuilder csv = new StringBuilder("session_id,started_at_utc,ended_at_utc,catch_success,measured_catches,catch_fail_min,catch_fail_max,catch_rate_min,catch_rate_max,logged_in_ms,fishing_ms,fishing_ticks,variable_timing,adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches,two_tick_catches,two_tick_failures,two_tick_timing\r\n");
 		for (FishingSession session : sessions)
 		{
 			csv.append(SessionStore.csvText(session.id)).append(',')
 				.append(SessionStore.csvText(Instant.ofEpochMilli(session.startedAt).toString())).append(',')
 				.append(SessionStore.csvText(session.endedAt == 0 ? "" : Instant.ofEpochMilli(session.endedAt).toString())).append(',')
 				.append(session.catches).append(',').append(session.measuredCatches).append(',')
-				.append(session.minimumFailures).append(',').append(session.failureUpper()).append(',')
+				.append(session.rateFailureLower()).append(',').append(session.failureUpper()).append(',')
 				.append(rate(session.rate(false))).append(',').append(rate(session.rate(true))).append(',')
 				.append(session.loggedMillis).append(',').append(session.fishingMillis).append(',')
 				.append(session.fishingTicks).append(',').append(session.variableTiming).append(',')
 				.append(session.adaptiveCatches).append(',').append(session.adaptiveFailureUpper).append(',')
-				.append(session.adaptiveTiming).append(',').append(session.rateCatches()).append("\r\n");
+				.append(session.adaptiveTiming).append(',').append(session.rateCatches()).append(',')
+				.append(session.twoTickCatches).append(',').append(session.twoTickFailures).append(',')
+				.append(session.twoTickTiming).append("\r\n");
 		}
 		// The chooser authorizes only this file; do not access its parent or siblings.
 		destination.write(csv.toString());

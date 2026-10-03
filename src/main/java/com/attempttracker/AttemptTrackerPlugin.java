@@ -10,6 +10,8 @@ import com.attempttracker.core.TrackingMethod;
 import com.attempttracker.core.FishingSession;
 import com.attempttracker.core.FishingSessions;
 import com.attempttracker.core.AdaptiveFishingSample;
+import com.attempttracker.core.TwoTickFishingTracker;
+import com.attempttracker.core.TwoTickFishingTracker.Result;
 import com.attempttracker.diagnostics.TickTrace;
 import com.attempttracker.store.SessionStore;
 import com.attempttracker.store.FishingSessionStore;
@@ -62,6 +64,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -107,6 +110,15 @@ public class AttemptTrackerPlugin extends Plugin
 	private long lastStrictCatches;
 	private boolean adaptiveFishing;
 	private int incomingHitsThisTick;
+	private final TwoTickFishingTracker twoTickTracker = new TwoTickFishingTracker();
+	private NPC twoTickSpot;
+	private WorldPoint twoTickSpotPosition, twoTickPlayerPosition;
+	private boolean twoTickIdleBefore, twoTickBlockedBefore;
+	private Integer twoTickSetup;
+	private boolean twoTickCombatHit, twoTickCombatRetarget, twoTickAcceptedFishing, twoTickConflict, twoTickOtherAnimation;
+	private boolean twoTickHarpoonStart, twoTickFreshHarpoon, twoTickRefused;
+	private int lastExplicitAttackTick = -100;
+	private String twoTickDiagnostic = "Waiting for a catch anchor";
 	private FishingSessionStore fishingStore;
 	private volatile FishingSession fishingSnapshot;
 	private volatile List<FishingSession> fishingHistorySnapshot = java.util.Collections.emptyList();
@@ -197,6 +209,8 @@ public class AttemptTrackerPlugin extends Plugin
 		adaptiveSample.restore(restored.adaptiveCatches, restored.adaptiveFailureUpper, restored.adaptiveTiming);
 		lastStrictCatches = restored.measuredCatches; adaptiveCatchesThisTick = 0; adaptiveInvalidated = false;
 		adaptiveActivity.stop(); adaptiveFishing = false; incomingHitsThisTick = 0;
+		twoTickTracker.restore(restored.twoTickCatches, restored.twoTickFailures); stopTwoTick(); clearTwoTickFrame();
+		lastExplicitAttackTick = -100;
 		lureSnapshot = LureDisplay.waiting(); summaryStatus = "Ready";
 		fishingSessions.advance(false, false);
 		}
@@ -268,7 +282,13 @@ public class AttemptTrackerPlugin extends Plugin
 		if (clean.contains("inventory is too full") || clean.contains("can't carry any more")
 			|| clean.contains("don't have enough inventory space") || clean.contains("not enough space in your inventory")
 			|| clean.contains("cannot carry any more") || clean.contains("don't have enough bait")
-			|| clean.contains("don't have enough shark lures")) { stopAfterTick = true; animationStopPending = false; pendingStart = null; stopAdaptive(); fishingSessions.advance(true, false); return; }
+			|| clean.contains("don't have enough shark lures"))
+		{
+			// Resolve this at GameTick: stop/catch packets in one completed frame
+			// can arrive in either order. A refusal alone is never a failed roll.
+			twoTickRefused = true;
+			stopAfterTick = true; animationStopPending = false; pendingStart = null; stopAdaptive(); fishingSessions.advance(true, false); return;
+		}
 		if (custom.matchesStart(message))
 		{
 			pendingStart = new PendingStart(client.getTickCount(), custom.skill, true, false);
@@ -282,6 +302,9 @@ public class AttemptTrackerPlugin extends Plugin
 				Player player = client.getLocalPlayer();
 				NPC spot = player != null && player.getInteracting() instanceof NPC ? (NPC) player.getInteracting() : fishingTarget;
 				adaptiveActivity.select(spot, client.getTickCount()); adaptiveActivity.accepted(client.getTickCount());
+				selectTwoTickSpot(spot == null ? twoTickSpot : spot); twoTickAcceptedFishing = true;
+				if (ActivityStarts.isHarpooning(message)) { twoTickHarpoonStart = true; }
+				else { twoTickConflict = true; }
 			}
 			pendingStart = new PendingStart(client.getTickCount(), startedSkill.get(), false, ActivityStarts.isHarpooning(message));
 			return;
@@ -332,6 +355,8 @@ public class AttemptTrackerPlugin extends Plugin
 		Player player = client.getLocalPlayer();
 		if (paused || player == null || client.getGameState() != GameState.LOGGED_IN)
 		{
+			stopTwoTick(); clearTwoTickFrame();
+			lastExplicitAttackTick = -100;
 			stopAdaptive(); adaptiveSample.discontinuity(); adaptiveCatchesThisTick = 0; incomingHitsThisTick = 0;
 			breakTiming(); fishingSessions.advance(client.getGameState() == GameState.LOGGED_IN, false);
 			status = paused ? "Paused." : "Waiting for login."; publish(); return;
@@ -344,6 +369,7 @@ public class AttemptTrackerPlugin extends Plugin
 		String account = player.getName() == null ? "" : player.getName();
 		if (!account.equals(lastAccount))
 		{
+			stopTwoTick();
 			stopAdaptive(); adaptiveSample.discontinuity();
 			breakTiming(); lastAccount = account; lastExperience.clear(); lastRawLureSetting = null;
 		}
@@ -407,6 +433,39 @@ public class AttemptTrackerPlugin extends Plugin
 			NPC spot = player.getInteracting() instanceof NPC ? (NPC) player.getInteracting() : fishingTarget;
 			fishingActivity.select(spot);
 		}
+		boolean wasAwaitingTwoTickRoll = twoTickTracker.isAwaitingRoll();
+		int weaponSpeed = config.adaptiveTiming() ? TwoTickFishingSignals.effectiveWeaponSpeed(client, itemManager) : 0;
+		int liveSetup = twoTickSetupFingerprint(weaponSpeed, rawLureSetting);
+		boolean stableSetup = twoTickSetup == null || twoTickSetup == liveSetup;
+		boolean stablePosition = twoTickPlayerPosition == null || twoTickPlayerPosition.equals(position);
+		boolean twoTickEligible = config.fishing() && config.adaptiveTiming() && !twoTickBlockedBefore
+			&& client.getItemContainer(InventoryID.INV) != null
+			&& stableSetup && stablePosition && validTwoTickSpot(player) && TwoTickFishingSignals.autoRetaliateEnabled(client)
+			&& (weaponSpeed == 2 || weaponSpeed == 3);
+		// Capture accepted harpooning within the frame, not the animation left
+		// after it: a completed catch can clear that animation on the same tick.
+		// A target change plus a stale harpoon animation alone is insufficient.
+		boolean acceptedHarpoon = (twoTickHarpoonStart || twoTickAcceptedFishing && twoTickFreshHarpoon)
+			&& (!sharksOnly() || twoTickSpot != null && (fishingSpot(twoTickSpot) == FishingSpot.SHARK));
+		boolean idleAfter = player.getInteracting() == null;
+		boolean otherActionAnimation = twoTickOtherAnimation || (player.getAnimation() >= 0 && !AnimationCatalog.isHarpoon(player.getAnimation()));
+		boolean qualifiedFlinch = twoTickCombatHit && twoTickCombatRetarget && twoTickIdleBefore
+			&& !otherActionAnimation && tick > lastExplicitAttackTick + 1;
+		boolean unknownTwoTickOutcome = traceSkill == Skill.FISHING && traceXpDelta > 0 && adaptiveCatchesThisTick == 0;
+		boolean modelConflict = twoTickConflict || (twoTickRefused && adaptiveCatchesThisTick == 0)
+			|| unknownTwoTickOutcome || otherActionAnimation;
+		Result twoTickResult = twoTickTracker.observe(tick, twoTickEligible, qualifiedFlinch, acceptedHarpoon,
+			idleAfter, modelConflict, adaptiveCatchesThisTick);
+		// A catch anchor alone must not interrupt ordinary fishing with a fast
+		// weapon equipped. The model owns frames only after a qualified flinch.
+		boolean twoTickOwnsFrame = wasAwaitingTwoTickRoll || twoTickResult == Result.ARMED
+			|| twoTickResult == Result.COUNTED || twoTickResult == Result.INVALIDATED;
+		twoTickDiagnostic = twoTickResult + "; eligible=" + twoTickEligible + "; speed=" + weaponSpeed + "; hit=" + twoTickCombatHit
+			+ "; retarget=" + twoTickCombatRetarget + "; idleBefore=" + twoTickIdleBefore + "; idleAfter=" + idleAfter
+			+ "; accepted=" + acceptedHarpoon + "; conflict=" + modelConflict + "; catches=" + twoTickTracker.getCatches()
+			+ "; failures=" + twoTickTracker.getFailures();
+		twoTickIdleBefore = idleAfter; twoTickBlockedBefore = inventoryFull(); twoTickSetup = liveSetup; twoTickPlayerPosition = position;
+		if (twoTickOwnsFrame) { engine.interruptTiming(); fishingSessions.stopVariable(); adaptiveSample.discontinuity(); }
 		boolean traceEligible = false;
 		boolean strictStarted = false;
 		boolean countingFishing = false;
@@ -416,9 +475,9 @@ public class AttemptTrackerPlugin extends Plugin
 			String activity = context.activity;
 			boolean matchingOutcomes = pendingSuccesses.isEmpty()
 				|| (pendingSuccesses.size() == 1 && pendingSuccesses.get(0).matches(context));
-			boolean estimate = (config.fixedTiming() || context.shark) && context.cycle > 0;
+			boolean estimate = !twoTickOwnsFrame && (config.fixedTiming() || context.shark) && context.cycle > 0;
 			AttemptTrackerConfig.SharkLures mode = effectiveSharkLures();
-			boolean variable = context.shark && !sharkTimingInvalidated && lureQuantity() > 0
+			boolean variable = !twoTickOwnsFrame && context.shark && !sharkTimingInvalidated && lureQuantity() > 0
 				&& (mode == AttemptTrackerConfig.SharkLures.ONE || mode == AttemptTrackerConfig.SharkLures.FIVE);
 			if ((estimate || variable) && !stopAfterTick && start != null && start.matches(context, tick))
 			{
@@ -496,14 +555,15 @@ public class AttemptTrackerPlugin extends Plugin
 				context == null ? "" : context.target, traceXpDelta, lureQuantity(), rawLureSetting,
 				context == null ? 0 : context.cycle, context == null ? 0 : context.firstDelay, observedMessagesThisTick, traceEligible, actionStartTick, traceResult,
 				liveTarget, context == null ? contextProblem(player) : "", start == null ? "" : start.label(), start == null ? -1 : start.tick,
-				incomingHitsThisTick, adaptiveCatchesThisTick, adaptiveActivity.rhythm());
+				incomingHitsThisTick, adaptiveCatchesThisTick, adaptiveActivity.rhythm(), twoTickDiagnostic);
 			final long run = generation;
 			final TickTrace runTrace = trace;
 			submitIo(run, io, () -> { try { runTrace.append(row); } catch (IOException ex) { reportIoError("Tick trace could not be saved", ex, run); } });
 		}
 		previousContext = context;
 		// The activity clock does not depend on a valid shark failure schedule.
-		boolean finalFishingCatch = stopAfterTick && observedMessagesThisTick == 1 && countingFishing;
+		boolean finalFishingCatch = stopAfterTick && adaptiveCatchesThisTick == 1
+			&& (countingFishing || twoTickResult == Result.COUNTED);
 		boolean previouslyAdaptiveFishing = adaptiveFishing;
 		countingFishing = config.fishing() && !stopAfterTick && fishingActivity.update(player, tick);
 		adaptiveFishing = config.fishing() && config.adaptiveTiming() && !stopAfterTick && adaptiveActivity.observe(player, tick)
@@ -514,11 +574,14 @@ public class AttemptTrackerPlugin extends Plugin
 		{
 			boolean unknownOutcome = traceSkill == Skill.FISHING && traceXpDelta > 0 && adaptiveCatchesThisTick == 0;
 			boolean includedMethod = !sharksOnly() || (context != null && context.shark) || adaptiveActivity.isSharkMethod();
-			adaptiveSample.observe(tick, includedMethod && !unknownOutcome && (adaptiveFishing || countingFishing), adaptiveCatchesThisTick,
+			adaptiveSample.observe(tick, !twoTickOwnsFrame && includedMethod && !unknownOutcome && (adaptiveFishing || countingFishing), adaptiveCatchesThisTick,
 				engine.isTimingActive() || fishingSessions.isVariableActive(), strictStarted,
 				adaptiveInvalidated || strictCatches < lastStrictCatches, (int) Math.min(Integer.MAX_VALUE, Math.max(0, strictCatches - lastStrictCatches)));
 			fishingSessions.adaptiveSample(adaptiveSample.getCatches(), adaptiveSample.getFailuresUpper(), adaptiveSample.isUsed());
 		}
+		boolean focusTwoTick = fishingSessions.current().twoTickTiming || twoTickResult == Result.COUNTED;
+		if (twoTickAcceptedFishing && !twoTickOwnsFrame) { focusTwoTick = false; }
+		fishingSessions.twoTickSample(twoTickTracker.getCatches(), twoTickTracker.getFailures(), focusTwoTick);
 		lastStrictCatches = strictCatches;
 		countingFishing |= adaptiveFishing;
 		if ((countingFishing || finalFishingCatch) && (fishingActivity.getStartedTick() != tick || previouslyAdaptiveFishing)) { fishingSessions.fishingTick(); }
@@ -530,6 +593,9 @@ public class AttemptTrackerPlugin extends Plugin
 			status = adaptiveFishing ? "Adaptive timing: possible attempt range. " + adaptiveActivity.rhythm()
 				: "Fishing timer active; catch attempts are not anchored for this method.";
 		}
+		if (twoTickResult == Result.COUNTED) { status = "Counting qualified 2t harpoon attempts (inferred)."; }
+		else if (twoTickResult == Result.ARMED) { status = "2t flinch qualified; awaiting next-tick harpooning."; }
+		else if (twoTickResult == Result.INVALIDATED) { status = "2t phase contradicted; current inferred segment excluded."; }
 		if (sharkTimingInvalidated && context != null && context.shark)
 		{
 			status = config.autoDetectLures() ? "Unrecognized lure setting; fishing time and catches are still tracked." : "Lure setting changed. Match Shark lures per catch to the game setting, then restart harpooning.";
@@ -543,22 +609,31 @@ public class AttemptTrackerPlugin extends Plugin
 				+ "; target " + (player.getInteracting() instanceof NPC ? player.getInteracting().getName() + " (" + ((NPC) player.getInteracting()).getId() + ")"
 					: fishingTarget == null ? selectedTarget : "remembered NPC " + fishingTarget.getId())
 				+ (context == null ? "; " + contextProblem(player) : "") + ".";
+			status += " 2t: " + twoTickDiagnostic + ".";
 		}
 		clearPending(); cancelled = false; stopAfterTick = false; animationStopPending = false; adaptiveCatchesThisTick = 0; adaptiveInvalidated = false; incomingHitsThisTick = 0;
+		clearTwoTickFrame();
 		publish();
 	}
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		if (!running || !changesGameAction(event)) { return; }
+		if (!running) { return; }
+		String rawOption = event.getMenuOption() == null ? "" : event.getMenuOption().toLowerCase(java.util.Locale.ROOT);
+		if (event.getMenuEntry() != null && event.getMenuEntry().isItemOp() && !rawOption.equals("drop") && !rawOption.startsWith("examine")) { twoTickConflict = true; }
+		if (!changesGameAction(event)) { return; }
 		String adaptiveOption = event.getMenuOption() == null ? "" : event.getMenuOption().toLowerCase(java.util.Locale.ROOT);
 		NPC clicked = event.getMenuEntry() == null ? null : event.getMenuEntry().getNpc();
+		boolean sameTileWalk = TwoTickFishingSignals.sameTileWalk(client.getLocalPlayer(), event);
+		if (FishingActivityTracker.isFishingOption(adaptiveOption)) { selectTwoTickSpot(clicked); }
+		else if (!sameTileWalk) { twoTickConflict = true; }
+		if (adaptiveOption.equals("attack")) { lastExplicitAttackTick = client.getTickCount(); }
 		if (config.adaptiveTiming() && FishingActivityTracker.isFishingOption(adaptiveOption) && FishingActivityTracker.isFishingSpot(clicked))
 		{
 			adaptiveActivity.select(clicked, client.getTickCount());
 		}
-		else if (config.adaptiveTiming() && (adaptiveOption.equals("eat") || adaptiveOption.equals("drink")
+		else if (config.adaptiveTiming() && (sameTileWalk || adaptiveOption.equals("eat") || adaptiveOption.equals("drink")
 			|| event.getMenuAction().name().startsWith("ITEM_USE_ON_") || event.getMenuAction().name().startsWith("WIDGET_TARGET_ON_")))
 		{
 			adaptiveActivity.manipulation(client.getTickCount());
@@ -591,7 +666,10 @@ public class AttemptTrackerPlugin extends Plugin
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
-		if (!running || event.getActor() != client.getLocalPlayer() || fishingAnimation < 0) { return; }
+		if (!running || event.getActor() != client.getLocalPlayer()) { return; }
+		if (AnimationCatalog.isHarpoon(event.getActor().getAnimation())) { twoTickFreshHarpoon = true; }
+		if (event.getActor().getAnimation() >= 0 && !AnimationCatalog.isHarpoon(event.getActor().getAnimation())) { twoTickOtherAnimation = true; }
+		if (fishingAnimation < 0) { return; }
 		if (event.getActor().getAnimation() != fishingAnimation)
 		{
 			if (AnimationCatalog.skillFor(event.getActor().getAnimation()) == Skill.FISHING
@@ -606,19 +684,23 @@ public class AttemptTrackerPlugin extends Plugin
 	{
 		breakTiming(); fishingSessions.sync(engine.getSessions()); fishingSessions.reset(); engine.startNewSession();
 		stopAdaptive(); adaptiveSample.restore(0, 0, false); lastStrictCatches = 0; adaptiveCatchesThisTick = 0; adaptiveInvalidated = false;
+		stopTwoTick(); twoTickTracker.reset(); clearTwoTickFrame();
 		status = "Session reset. Interact with a fishing spot to begin."; publish();
 	}
 
 	@Subscribe
 	public void onInteractingChanged(InteractingChanged event)
 	{
-		if (!running || event.getSource() != client.getLocalPlayer() || event.getTarget() == null) { return; }
+		if (!running || event.getSource() != client.getLocalPlayer()) { return; }
+		if (event.getTarget() == null) { return; }
+		if (isCombatTarget(event.getTarget())) { twoTickCombatRetarget = true; }
 		if (!(event.getTarget() instanceof NPC) || !FishingActivityTracker.isFishingSpot((NPC) event.getTarget()))
 		{
 			breakTiming();
 			return;
 		}
 		NPC npc = (NPC) event.getTarget();
+		selectTwoTickSpot(npc); twoTickAcceptedFishing = true;
 		if (config.adaptiveTiming()) { adaptiveActivity.select(npc, client.getTickCount()); adaptiveActivity.accepted(client.getTickCount()); }
 		if (!fishingActivity.targets(npc))
 		{
@@ -632,6 +714,7 @@ public class AttemptTrackerPlugin extends Plugin
 	@Subscribe
 	public void onNpcDespawned(NpcDespawned event)
 	{
+		if (twoTickSpot == event.getNpc()) { stopTwoTick(); }
 		if (adaptiveActivity.targets(event.getNpc())) { stopAdaptive(); }
 		if (fishingActivity.targets(event.getNpc()) || fishingTarget == event.getNpc() || (previousContext != null && previousContext.actor == event.getNpc())) { breakTiming(); }
 	}
@@ -646,7 +729,7 @@ public class AttemptTrackerPlugin extends Plugin
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		if (!running) { return; }
-		if (event.getGameState() != GameState.LOGGED_IN) { stopAdaptive(); adaptiveCatchesThisTick = 0; breakTiming(); adaptiveSample.discontinuity(); previousPosition = null; lastExperience.clear(); }
+		if (event.getGameState() != GameState.LOGGED_IN) { stopTwoTick(); clearTwoTickFrame(); lastExplicitAttackTick = -100; stopAdaptive(); adaptiveCatchesThisTick = 0; breakTiming(); adaptiveSample.discontinuity(); previousPosition = null; lastExperience.clear(); }
 		fishingSessions.advance(event.getGameState() == GameState.LOGGED_IN, false); publish();
 	}
 
@@ -683,7 +766,7 @@ public class AttemptTrackerPlugin extends Plugin
 		{
 			boolean ignoredManualLureChoice = config.autoDetectLures() && "sharkLures".equals(event.getKey());
 			boolean displayOnly = ignoredManualLureChoice || "showOverlay".equals(event.getKey()) || "diagnostics".equals(event.getKey()) || "saveTrace".equals(event.getKey());
-			if (!displayOnly) { custom = new CustomActivity(config); stopAdaptive(); breakTiming(); adaptiveSample.discontinuity(); }
+			if (!displayOnly) { custom = new CustomActivity(config); stopTwoTick(); clearTwoTickFrame(); stopAdaptive(); breakTiming(); adaptiveSample.discontinuity(); }
 			if ((!config.autoDetectLures() && "sharkLures".equals(event.getKey())) || ("fixedTiming".equals(event.getKey()) && config.fixedTiming()))
 			{
 				sharkTimingInvalidated = false;
@@ -874,6 +957,55 @@ public class AttemptTrackerPlugin extends Plugin
 	}
 	private boolean sharksOnly() { return config.sharksOnly() && !config.trackAllFish(); }
 	private void stopAdaptive() { adaptiveActivity.stop(); adaptiveFishing = false; }
+	private void clearTwoTickFrame()
+	{
+		twoTickCombatHit = twoTickCombatRetarget = twoTickAcceptedFishing = twoTickConflict = twoTickOtherAnimation = false;
+		twoTickHarpoonStart = twoTickFreshHarpoon = twoTickRefused = false;
+	}
+	private void stopTwoTick()
+	{
+		twoTickTracker.discontinuity(); twoTickSpot = null; twoTickSpotPosition = twoTickPlayerPosition = null;
+		twoTickIdleBefore = false; twoTickBlockedBefore = false; twoTickSetup = null;
+	}
+	private void selectTwoTickSpot(NPC spot)
+	{
+		if (!TwoTickFishingSignals.supportedSpot(spot)) { stopTwoTick(); return; }
+		if (spot != twoTickSpot || twoTickSpotPosition == null || !twoTickSpotPosition.equals(spot.getWorldLocation()))
+		{
+			stopTwoTick(); twoTickSpot = spot; twoTickSpotPosition = spot.getWorldLocation();
+		}
+	}
+	private boolean validTwoTickSpot(Player player)
+	{
+		WorldPoint position = player.getWorldLocation();
+		return TwoTickFishingSignals.supportedSpot(twoTickSpot) && twoTickSpotPosition != null
+			&& twoTickSpotPosition.equals(twoTickSpot.getWorldLocation()) && position != null
+			&& position.getPlane() == twoTickSpotPosition.getPlane() && position.distanceTo(twoTickSpotPosition) <= 1
+			&& player.getWorldView() != null && player.getWorldView() == twoTickSpot.getWorldView();
+	}
+	private int twoTickSetupFingerprint(int speed, int rawLures)
+	{
+		// Supply exhaustion/level-ups can result from a successful roll. They do
+		// not change flinch cadence and must not selectively exclude that catch.
+		int hash = java.util.Objects.hash(speed, rawLures, client.getVarpValue(VarPlayerID.COM_MODE),
+			client.getVarbitValue(VarbitID.COMBAT_WEAPON_CATEGORY));
+		ItemContainer worn = client.getItemContainer(InventoryID.WORN);
+		Item weapon = worn == null ? null : worn.getItem(net.runelite.api.EquipmentInventorySlot.WEAPON.getSlotIdx());
+		hash = 31 * hash + (weapon == null ? -1 : weapon.getId());
+		return hash;
+	}
+	private boolean isCombatTarget(Actor target)
+	{
+		if (target == client.getLocalPlayer()) { return false; }
+		if (target instanceof Player) { return true; }
+		if (!(target instanceof NPC) || FishingActivityTracker.isFishingSpot((NPC) target)) { return false; }
+		net.runelite.api.NPCComposition definition = ((NPC) target).getTransformedComposition();
+		if (definition != null && definition.getActions() != null)
+		{
+			for (String action : definition.getActions()) { if ("Attack".equalsIgnoreCase(action)) { return true; } }
+		}
+		return false;
+	}
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event)
 	{
@@ -881,6 +1013,7 @@ public class AttemptTrackerPlugin extends Plugin
 			&& event.getActor() == client.getLocalPlayer())
 		{
 			adaptiveActivity.manipulation(client.getTickCount()); incomingHitsThisTick++;
+			if (TwoTickFishingSignals.combatHitsplat(event.getHitsplat())) { twoTickCombatHit = true; }
 			if (adaptiveFishing && adaptiveActivity.canBridge(client.getTickCount())) { fishingSessions.advance(true, true); }
 		}
 	}
@@ -1029,7 +1162,7 @@ public class AttemptTrackerPlugin extends Plugin
 		long fingerprint = 1;
 		for (AttemptSession session : snapshot) { fingerprint = 31 * fingerprint + java.util.Objects.hash(session.getId(), session.getSuccesses(), session.getFailures(), session.getExcludedWindows()); }
 		fishingHistorySnapshot = fishSnapshot;
-		for (FishingSession session : fishSnapshot) { fingerprint = 31 * fingerprint + java.util.Objects.hash(session.id, session.catches, session.measuredCatches, session.minimumFailures, session.maximumFailures, session.adaptiveCatches, session.adaptiveFailureUpper, session.adaptiveTiming, session.fishingTicks, session.loggedMillis / 5000, session.fishingMillis / 5000, summaryStatus); }
+		for (FishingSession session : fishSnapshot) { fingerprint = 31 * fingerprint + java.util.Objects.hash(session.id, session.catches, session.measuredCatches, session.minimumFailures, session.maximumFailures, session.adaptiveCatches, session.adaptiveFailureUpper, session.adaptiveTiming, session.twoTickCatches, session.twoTickFailures, session.twoTickTiming, session.fishingTicks, session.loggedMillis / 5000, session.fishingMillis / 5000, summaryStatus); }
 		synchronized (lifecycleLock)
 		{
 		if (isCurrent(run) && io != null && !io.isShutdown() && fingerprint != savedFingerprint)

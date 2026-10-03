@@ -19,6 +19,9 @@ public final class FishingSession
 	public long adaptiveCatches;
 	public long adaptiveFailureUpper;
 	public boolean adaptiveTiming;
+	public long twoTickCatches;
+	public long twoTickFailures;
+	public boolean twoTickTiming;
 
 	public FishingSession copy()
 	{
@@ -29,16 +32,20 @@ public final class FishingSession
 		copy.loggedMillis = loggedMillis; copy.fishingMillis = fishingMillis; copy.fishingTicks = fishingTicks;
 		copy.variableTiming = variableTiming;
 		copy.adaptiveCatches = adaptiveCatches; copy.adaptiveFailureUpper = adaptiveFailureUpper; copy.adaptiveTiming = adaptiveTiming;
+		copy.twoTickCatches = twoTickCatches; copy.twoTickFailures = twoTickFailures; copy.twoTickTiming = twoTickTiming;
 		return copy;
 	}
 	public double rate(boolean upper)
 	{
 		// Unanchored catches remain in the total but cannot supply a denominator.
 		long successes = rateCatches();
-		if (successes == 0 && maximumFailures == 0) { return Double.NaN; }
-		long failures = upper ? minimumFailures : failureUpper();
+		if (twoTickTiming ? twoTickAttempts() == 0 : successes == 0 && rateFailureLower() == 0 && maximumFailures == 0) { return Double.NaN; }
+		long failures = upper ? rateFailureLower() : failureUpper();
 		return successes == 0 ? 0 : successes / ((double) successes + failures);
 	}
-	public long rateCatches() { return measuredCatches + adaptiveCatches; }
-	public long failureUpper() { return adaptiveFailureUpper > Long.MAX_VALUE - maximumFailures ? Long.MAX_VALUE : maximumFailures + adaptiveFailureUpper; }
+	public long twoTickAttempts() { return add(twoTickCatches, twoTickFailures); }
+	public long rateCatches() { return twoTickTiming ? twoTickCatches : add(add(measuredCatches, adaptiveCatches), twoTickCatches); }
+	public long rateFailureLower() { return twoTickTiming ? twoTickFailures : add(minimumFailures, twoTickFailures); }
+	public long failureUpper() { return twoTickTiming ? twoTickFailures : add(add(maximumFailures, adaptiveFailureUpper), twoTickFailures); }
+	private static long add(long left, long right) { return right > Long.MAX_VALUE - left ? Long.MAX_VALUE : left + right; }
 }
