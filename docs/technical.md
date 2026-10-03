@@ -2,7 +2,7 @@
 
 <img src="../icon.png" alt="Attempt Tracker fish and stopwatch icon" width="48" height="48">
 
-Version **1.1.8** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
+Version **1.1.9** is a simple fishing session tracker for RuneLite. The sidebar shows **Detected lures**, **Catch success**, **Catch fail**, **Catch rate**, **Logged in** time, **Fishing** time, and elapsed fishing ticks. History and diagnostics are folded away. The plugin observes gameplay; it does not automate it.
 
 ## Using the plugin
 
@@ -65,16 +65,16 @@ On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
 
 Outputs:
 
-- `build/distributions/attempt-tracker-1.1.8.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
-- `build/libs/attempt-tracker-1.1.8-all.jar`: executable client with the plugin registered.
-- `build/libs/attempt-tracker-1.1.8.jar`: plugin-only JAR for development tooling.
+- `build/distributions/attempt-tracker-1.1.9.zip`: executable development client, plugin JAR, Windows start script, metadata, README, icon, and license.
+- `build/libs/attempt-tracker-1.1.9-all.jar`: executable client with the plugin registered.
+- `build/libs/attempt-tracker-1.1.9.jar`: plugin-only JAR for development tooling.
 - `build/preview/attempt-tracker.png`: sidebar and overlay preview using demonstration data.
 - `build/reports/tests/test/index.html`: test report.
 
 Extract the ZIP and run `start-attempt-tracker.bat`, or launch directly:
 
 ```powershell
-java -ea -jar .\attempt-tracker-1.1.8-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
+java -ea -jar .\attempt-tracker-1.1.9-all.jar --developer-mode --disable-telemetry --profile attempt-tracker-dev
 ```
 
 `-ea` is required for RuneLite's development plugin loader. The executable bundles client dependencies and the launcher, excluding JUnit/Mockito/test classes. The plugin-only JAR does not install itself in a normal client. The initial [Plugin Hub submission](https://github.com/runelite/plugin-hub/pull/17633) was merged; further updates still require RuneLite's review and build process.
@@ -83,7 +83,7 @@ For a Jagex account, use RuneLite's official [Using Jagex Accounts](https://gith
 
 ## Validation
 
-**201 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
+**204 automated tests pass**. They cover the existing detectors, fixed-cycle estimates, variable schedule bounds compared with exhaustive schedules, pauses, tab changes, manual reset, logout/login, clock persistence, CSV, corrupt-file backup, lifecycle races, and sidebar selection/layout. Activity clock checks cover every catalogued spot and representative fishing methods. Automatic lure tests cover stale manual declarations, mode changes, unknown values, no supply, hidden tackle-box supply, and the live five-lure trace. New checks cover immediate sidebar updates, history selection, logout/missing supply, and waiting for inventory loading before estimating. A 6,000-tick variable-failure fixture checks bounded tracker state. The real sidebar and overlay have also been rendered and visually inspected at the normal 225-pixel panel width.
 
 Historical **v1.0.4** live test: crystal harpoon, three lures, Fishing 77, start tick 24. Deadlines 28 through 128 produced 17 catches and four inferred failures over 21 attempts. Lure consumption was 51, and Fishing XP was 22 per catch. Another 11 idle ticks added no attempts; logout preserved totals. This verifies that particular three-lure cadence. The one-lure live validation is documented below; it is separate from this older three-lure test.
 
@@ -94,3 +94,5 @@ This independent project is not endorsed by RuneLite or Jagex.
 Version 1.1.3 separates actual fishing time from shark roll estimates. NPC clicks and interaction events select spots using RuneLite's global catalog, with a named-spot/action fallback for missing IDs. Fishing animations confirm activity; walking and idle time are excluded. Normal rod casting-to-fishing, looping nets, and barehand fishing transitions continue the clock. Aerial fishing supports remote pools. Logout, reset, action changes, full inventory, player movement while fishing, and spot movement/despawn pause it. Unsupported schedules create no estimated failures. Catch counters still obey the existing shark filter. Automated checks cover every catalogued spot and representative methods; this is not a claim that every spot has been tested in-game. [RuneLite's spot catalog](https://github.com/runelite/runelite/blob/master/runelite-client/src/main/java/net/runelite/client/game/FishingSpot.java) is the primary ID source.
 
 Version 1.1.1 fixes a guard that kept one-lure tracking in successes-only mode when the plugin setting was changed before the game setting. Regression tests replay the actual one-lure trace: start 1036, catches 1040, 1045, 1051, 1062, 1074, one lure consumed per catch, yielding five successes and two inferred failures. The patched v1.1.1 live test then recorded 14 measured catches and five inferred failures in the first completed run, consumed 14 lures, and paused at the stop. Version 1.1.2 also shows the rate for the measured sample when other catches in the same session were untracked; it retains those catches and identifies the sample beneath the rate.
+
+Version 1.1.9 fixes enabling or updating the plugin while already logged in. Startup reads of game state and lure settings run on RuneLite's client thread, with lifecycle guards that discard callbacks from a disabled instance. Regression checks exercise actual Swing startup, disable/re-enable, the bundled sidebar icon, and the visible settings descriptor. Tests use an isolated home directory.

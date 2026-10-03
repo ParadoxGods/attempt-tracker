@@ -178,7 +178,8 @@ public class AttemptTrackerPlugin extends Plugin
 		previousContext = null; previousPosition = null; selectedObject = null; clearFishingTarget(); lastExperience.clear();
 		lastRawLureSetting = null; sharkTimingInvalidated = false; selectedTarget = ""; gatherLabel = "";
 		fishingAnimation = -1; fishingActivity.stop(); lastDisplayedRawLureSetting = Integer.MIN_VALUE;
-		lureSnapshot = LureDisplay.waiting(); fishingSessions.advance(client.getGameState() == GameState.LOGGED_IN, false);
+		lureSnapshot = LureDisplay.waiting(); summaryStatus = "Ready";
+		fishingSessions.advance(false, false);
 		}
 		SwingUtilities.invokeLater(() ->
 		{
@@ -193,7 +194,12 @@ public class AttemptTrackerPlugin extends Plugin
 		});
 		overlay = new AttemptTrackerOverlay(() -> fishingSnapshot, config::showOverlay, this::simpleStatus);
 		overlayManager.add(overlay);
-		publish();
+		// Plugin Hub can enable or replace plugins on the EDT while already logged in.
+		invokeClient(run, () ->
+		{
+			fishingSessions.advance(client.getGameState() == GameState.LOGGED_IN, false);
+			publish();
+		});
 	}
 
 	@Override
