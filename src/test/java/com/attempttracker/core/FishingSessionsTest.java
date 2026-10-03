@@ -17,8 +17,60 @@ public class FishingSessionsTest
 		assertEquals(40, session.rateCatches()); assertEquals(10, session.rateFailureLower()); assertEquals(10, session.failureUpper());
 		assertEquals(0.8, session.rate(false), 0); assertEquals(0.8, session.rate(true), 0);
 		book.twoTickSample(40, 10, false);
-		assertEquals(100, session.rateCatches()); assertEquals(15, session.rateFailureLower()); assertEquals(115, session.failureUpper());
-		assertEquals(100.0 / 215, session.rate(false), 0.000001); assertEquals(100.0 / 115, session.rate(true), 0.000001);
+		assertEquals(50, session.rateCatches()); assertEquals(15, session.rateFailureLower()); assertEquals(15, session.failureUpper());
+		assertEquals(50.0 / 65, session.rate(false), 0.000001); assertEquals(50.0 / 65, session.rate(true), 0.000001);
+	}
+	@Test public void modeledFocusUsesOnlyTimerQualifiedAttemptsAndFallbackRetainsSeparateSupportedCohorts()
+	{
+		FishingSessions book = new FishingSessions(); FishingSession session = book.current();
+		session.catches = 100; session.measuredCatches = 10; session.minimumFailures = 4; session.maximumFailures = 5;
+		book.twoTickSample(20, 5, true); book.adaptiveSample(70, 100, true);
+		book.modeledSample(40, 10, 10, true);
+		assertEquals(100, session.catches); assertEquals(30, session.adaptiveCatches);
+		assertEquals(40, session.rateCatches()); assertEquals(50, session.modeledAttempts(false));
+		assertEquals(0.8, session.rate(false), 0); assertEquals(0.8, session.rate(true), 0);
+		book.modeledSample(40, 10, 11, true);
+		assertEquals(40.0 / 51, session.rate(false), 0.000001); assertEquals(0.8, session.rate(true), 0);
+		book.modeledSample(40, 10, 11, false); book.twoTickSample(20, 5, false);
+		assertEquals(70, session.rateCatches()); assertEquals(19, session.rateFailureLower()); assertEquals(21, session.failureUpper());
+		assertEquals(70.0 / 91, session.rate(false), 0.000001); assertEquals(70.0 / 89, session.rate(true), 0.000001);
+	}
+	@Test public void modeledHistoryPersistsThroughRestartAndManualResetWithoutOverlappingCatches()
+	{
+		FishingSessions book = new FishingSessions(); book.current().catches = 60; book.current().measuredCatches = 10;
+		book.twoTickSample(5, 2, false); book.adaptiveSample(45, 80, true); book.modeledSample(40, 10, 12, true);
+		assertEquals(5, book.current().adaptiveCatches); book.adaptiveSample(100, 80, true); assertEquals(5, book.current().adaptiveCatches);
+		book.modeledSample(100, 10, 12, true); assertEquals(45, book.current().modeledCatches); assertEquals(0, book.current().adaptiveCatches);
+		book.twoTickSample(100, 2, false); assertEquals(5, book.current().twoTickCatches);
+		FishingSessions resumed = new FishingSessions(); resumed.restore(book.snapshots());
+		assertEquals(book.current().id, resumed.current().id); assertEquals(45, resumed.current().modeledCatches);
+		assertEquals(10, resumed.current().modeledFailureLower); assertEquals(12, resumed.current().modeledFailureUpper); assertTrue(resumed.current().modeledTiming);
+		resumed.reset(); assertEquals(45, resumed.snapshots().get(1).modeledCatches);
+		assertEquals(0, resumed.current().modeledAttempts(true)); assertFalse(resumed.current().modeledTiming);
+		assertFalse(resumed.current().hasSupportedAttempts()); assertTrue(Double.isNaN(resumed.current().rate(false)));
+	}
+	@Test public void corruptModeledCohortsAreRejectedAndInputBoundsAreClamped()
+	{
+		FishingSessions book = new FishingSessions(); book.current().catches = 10; book.modeledSample(8, 2, 3, true);
+		FishingSession overlap = book.current().copy(); overlap.id = "overlap"; overlap.measuredCatches = 3;
+		FishingSession negative = book.current().copy(); negative.id = "negative"; negative.modeledCatches = -1;
+		FishingSession reversed = book.current().copy(); reversed.id = "reversed"; reversed.modeledFailureUpper = 1;
+		FishingSession overflow = book.current().copy(); overflow.id = "overflow"; overflow.modeledFailureUpper = Long.MAX_VALUE;
+		book.restore(Arrays.asList(overlap, negative, reversed, overflow, book.current().copy()));
+		assertEquals(1, book.snapshots().size()); assertEquals(8, book.current().modeledCatches);
+		book.modeledSample(8, 5, 3, true); assertEquals(5, book.current().modeledFailureUpper);
+		book.modeledSample(8, Long.MAX_VALUE, Long.MAX_VALUE, true);
+		assertEquals(Long.MAX_VALUE - 8, book.current().modeledFailureUpper); assertEquals(Long.MAX_VALUE, book.current().modeledAttempts(true));
+	}
+	@Test public void adaptiveOnlyEvidenceCannotEstablishAttemptsAndZeroRateRequiresAtLeastOneKnownAttempt()
+	{
+		FishingSession session = new FishingSession(); session.catches = session.adaptiveCatches = 30; session.adaptiveFailureUpper = 60;
+		assertEquals(0, session.rateCatches()); assertEquals(0, session.failureUpper());
+		assertFalse(session.hasSupportedAttempts()); assertTrue(Double.isNaN(session.rate(false)));
+		session.modeledTiming = true; session.modeledFailureUpper = 1;
+		assertFalse(session.hasSupportedAttempts()); assertTrue(Double.isNaN(session.rate(false)));
+		session.modeledFailureLower = 1;
+		assertTrue(session.hasSupportedAttempts()); assertEquals(0, session.rate(false), 0); assertEquals(0, session.rate(true), 0);
 	}
 	@Test public void twoTickRestoreAndResetKeepCohortWithoutInventingEmptyRate()
 	{
@@ -58,7 +110,8 @@ public class FishingSessionsTest
 		FishingSession session = new FishingSession(); session.catches = 4;
 		assertTrue(Double.isNaN(session.rate(false))); assertTrue(Double.isNaN(session.rate(true)));
 		session.maximumFailures = 1;
-		assertEquals(0, session.rate(false), 0); assertEquals(0, session.rate(true), 0);
+		assertTrue(Double.isNaN(session.rate(false))); assertTrue(Double.isNaN(session.rate(true)));
+		session.minimumFailures = 1; assertEquals(0, session.rate(false), 0); assertEquals(0, session.rate(true), 0);
 	}
 	@Test public void clocksPauseWithoutResettingAndRestartExcludesOfflineTime()
 	{

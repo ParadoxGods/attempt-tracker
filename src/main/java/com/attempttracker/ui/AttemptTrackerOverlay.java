@@ -28,7 +28,9 @@ public final class AttemptTrackerOverlay extends OverlayPanel
 		if (current != null)
 		{
 			line("Catch success", Long.toString(current.catches)); line("Catch fail", AttemptTrackerPanel.failures(current)); line("Catch rate", AttemptTrackerPanel.rates(current)); line("Fishing time", AttemptTrackerPanel.duration(current.fishingMillis));
-			if (current.twoTickTiming) { line("2t sample (inferred)", Long.toString(current.twoTickAttempts()) + " attempts"); }
+			if (!current.hasSupportedAttempts()) { line("Waiting for supported attempts", ""); }
+			else if (current.modeledTiming) { line("Timing sample (inferred)", AttemptTrackerPanel.modeledAttempts(current) + " attempts"); }
+			else if (current.twoTickTiming) { line("2t sample (inferred)", Long.toString(current.twoTickAttempts()) + " attempts"); }
 		}
 		line(status.get(), ""); return super.render(graphics);
 	}

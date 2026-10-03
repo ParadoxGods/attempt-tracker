@@ -100,13 +100,13 @@ public final class AttemptTrackerPreview
 		FishingSession adaptive = new FishingSession(); adaptive.catches = adaptive.adaptiveCatches = 30;
 		adaptive.adaptiveFailureUpper = 60; adaptive.adaptiveTiming = true; adaptive.loggedMillis = 180000; adaptive.fishingMillis = 54000; adaptive.fishingTicks = 90;
 		AttemptTrackerPanel adaptivePanel = new AttemptTrackerPanel(() -> {}, () -> {}); adaptivePanel.onActivate();
-		adaptivePanel.refresh(Arrays.asList(adaptive), "Fishing", "Adaptive timing: possible attempt range. 2t interactions (rolls unverified)", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
+		adaptivePanel.refresh(Arrays.asList(adaptive), "Fishing", "Fishing timer active; waiting for supported attempts.", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
 		adaptivePanel.setSize(225, 650); for (int i = 0; i < 3; i++) { layout(adaptivePanel); }
 		Graphics2D adaptiveGraphics = (Graphics2D) graphics.create(790, 42, 225, 650); adaptivePanel.printAll(adaptiveGraphics); adaptiveGraphics.dispose();
-		FishingSession twoTick = new FishingSession(); twoTick.catches = 41; twoTick.twoTickCatches = 40; twoTick.twoTickFailures = 10; twoTick.twoTickTiming = true;
+		FishingSession twoTick = new FishingSession(); twoTick.catches = 41; twoTick.modeledCatches = 40; twoTick.modeledFailureLower = twoTick.modeledFailureUpper = 10; twoTick.modeledTiming = true;
 		twoTick.loggedMillis = 120000; twoTick.fishingMillis = 60000; twoTick.fishingTicks = 100;
 		AttemptTrackerPanel twoTickPanel = new AttemptTrackerPanel(() -> {}, () -> {}); twoTickPanel.onActivate();
-		twoTickPanel.refresh(Arrays.asList(twoTick), "Fishing", "Counting qualified 2t harpoon attempts (inferred).", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
+		twoTickPanel.refresh(Arrays.asList(twoTick), "Fishing", "Counting fishing attempts from observed timer actions (inferred).", new LureDisplay("1 per catch", "Detected automatically", "Live lure choice"));
 		twoTickPanel.setSize(225, 650); for (int i = 0; i < 3; i++) { layout(twoTickPanel); }
 		Graphics2D twoTickGraphics = (Graphics2D) graphics.create(1045, 42, 225, 650); twoTickPanel.printAll(twoTickGraphics); twoTickGraphics.dispose();
 		AttemptTrackerOverlay twoTickOverlay = new AttemptTrackerOverlay(() -> twoTick, () -> true, () -> "Fishing");

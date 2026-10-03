@@ -1623,9 +1623,9 @@ public class AttemptTrackerPluginTest
 			h.tick(tick);
 		}
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(10, session.catches); assertEquals(10, session.rateCatches()); assertTrue(session.adaptiveTiming);
-		assertEquals(0, session.minimumFailures); assertTrue(session.failureUpper() > 0);
-		assertTrue(Double.isFinite(session.rate(false))); assertEquals(1, session.rate(true), 0);
+		assertEquals(10, session.catches); assertEquals(10, session.adaptiveCatches); assertTrue(session.adaptiveTiming);
+		assertEquals(0, session.rateCatches()); assertTrue(session.adaptiveFailureUpper > 0);
+		assertEquals(0, session.failureUpper()); assertTrue(Double.isNaN(session.rate(false)));
 	}
 	@Test public void incomingHitsBridgeCombatOnlyAfterConfirmedFishingAndStopAfterTwoTicks() throws Exception
 	{
@@ -1663,7 +1663,8 @@ public class AttemptTrackerPluginTest
 			h.tick(tick);
 		}
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(10, session.catches); assertEquals(10, session.rateCatches()); assertEquals(20, session.fishingTicks);
+		assertEquals(10, session.catches); assertEquals(10, session.adaptiveCatches); assertEquals(20, session.fishingTicks);
+		assertEquals(0, session.rateCatches()); assertTrue(Double.isNaN(session.rate(false)));
 		assertTrue(session.adaptiveTiming); assertTrue(((String)get(h.plugin, "status")).contains("2t interactions"));
 	}
 	@Test public void unrecognizedFishingXpDoesNotBecomeAnAdaptiveFailure() throws Exception
@@ -1729,7 +1730,7 @@ public class AttemptTrackerPluginTest
 		h.interaction(h.player, h.spot); h.tick(0);
 		h.chat(ChatMessageType.SPAM, "You catch a karambwan."); h.tick(1);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(1, session.catches); assertEquals(1, session.adaptiveCatches); assertTrue(Double.isFinite(session.rate(false)));
+		assertEquals(1, session.catches); assertEquals(1, session.adaptiveCatches); assertTrue(Double.isNaN(session.rate(false)));
 	}
 	@Test public void ordinaryThreeLureTimingIsUnchangedWithAdaptiveEnabled() throws Exception
 	{
@@ -1769,8 +1770,8 @@ public class AttemptTrackerPluginTest
 			h.twoTickFish(roll % 5 != 0); h.tick(roll * 2);
 		}
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(41, session.catches); assertEquals(40, session.twoTickCatches); assertEquals(10, session.twoTickFailures);
-		assertEquals(50, session.twoTickAttempts()); assertTrue(session.twoTickTiming);
+		assertEquals(41, session.catches); assertEquals(40, session.modeledCatches); assertEquals(10, session.modeledFailureLower);
+		assertEquals(50, session.modeledAttempts(true)); assertTrue(session.modeledTiming);
 		assertEquals(0.8, session.rate(false), 0); assertEquals(0.8, session.rate(true), 0);
 		assertEquals(0, session.adaptiveFailureUpper); assertEquals(0, session.measuredCatches);
 	}
@@ -1782,7 +1783,7 @@ public class AttemptTrackerPluginTest
 			h.twoTickFlinch(reverse); h.twoTickFlinch(!reverse); h.tick(1);
 			h.twoTickFish(false); h.tick(2);
 			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-			assertEquals(1, session.twoTickFailures); assertEquals(0, session.twoTickCatches); assertEquals(0, session.rate(false), 0);
+			assertEquals(1, session.modeledFailureLower); assertEquals(0, session.modeledCatches); assertEquals(0, session.rate(false), 0);
 		}
 	}
 	@Test public void ordinaryFishingWithFastWeaponAndClearedFacingKeepsItsLureSchedule() throws Exception
@@ -1793,7 +1794,7 @@ public class AttemptTrackerPluginTest
 		h.ticks(5, 14, 9);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
 		assertEquals(2, session.catches); assertEquals(2, session.measuredCatches); assertEquals(1, session.minimumFailures);
-		assertEquals(0, session.twoTickAttempts()); assertFalse(session.twoTickTiming); assertEquals(2.0 / 3, session.rate(false), 0);
+		assertEquals(0, session.modeledAttempts(true)); assertFalse(session.modeledTiming); assertEquals(2.0 / 3, session.rate(false), 0);
 	}
 	@Test public void stationaryGroundClearingCueKeepsQualifiedTwoTickClockAndSample() throws Exception
 	{
@@ -1805,7 +1806,7 @@ public class AttemptTrackerPluginTest
 		when(walk.getWorldViewId()).thenReturn(-1); when(walk.getParam0()).thenReturn(0); when(walk.getParam1()).thenReturn(0);
 		h.plugin.onMenuOptionClicked(new MenuOptionClicked(walk)); h.twoTickFlinch(false); h.tick(1); h.twoTickFish(false); h.tick(2);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(1, session.twoTickFailures); assertEquals(2, session.fishingTicks);
+		assertEquals(1, session.modeledFailureLower); assertEquals(2, session.fishingTicks);
 	}
 	@Test public void missingFishingClickAutoRetaliateOffAndSlowWeaponNeverCreateTwoTickFailures() throws Exception
 	{
@@ -1826,7 +1827,7 @@ public class AttemptTrackerPluginTest
 			}
 			h.tick(1); if (!broken.equals("missing")) { h.twoTickFish(false); } h.tick(2);
 			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-			assertEquals(broken, 0, session.twoTickAttempts()); assertFalse(broken, session.twoTickTiming);
+			assertEquals(broken, 0, session.modeledAttempts(true)); assertFalse(broken, session.modeledTiming);
 		}
 	}
 	@Test public void twoTickFinalInventoryFillingCatchRemainsACompletedAttemptAndPauses() throws Exception
@@ -1837,9 +1838,9 @@ public class AttemptTrackerPluginTest
 		h.animation(-1);
 		h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); h.tick(2); h.ticks(3, 10);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(2, session.catches); assertEquals(1, session.twoTickCatches); assertEquals(1, session.twoTickAttempts());
+		assertEquals(2, session.catches); assertEquals(1, session.modeledCatches); assertEquals(1, session.modeledAttempts(true));
 		assertEquals(before + 1, session.fishingTicks);
-		assertFalse(((com.attempttracker.core.TwoTickFishingTracker)get(h.plugin, "twoTickTracker")).isActive());
+		assertFalse(((com.attempttracker.core.ManipulatedFishingTracker)get(h.plugin, "modelTracker")).isActive());
 	}
 	@Test public void twoTickRequiresAcceptedHarpoonRatherThanStaleAnimationOrOtherFishingStart() throws Exception
 	{
@@ -1853,7 +1854,7 @@ public class AttemptTrackerPluginTest
 			if (evidence.equals("stopped")) { h.startSharks(); h.animation(-1); }
 			when(h.player.getInteracting()).thenReturn(null); h.interaction(h.player, null); h.tick(2);
 			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-			assertEquals(evidence, evidence.equals("fresh") || evidence.equals("stopped") ? 1 : 0, session.twoTickFailures);
+			assertEquals(evidence, evidence.equals("fresh") || evidence.equals("stopped") ? 1 : 0, session.modeledFailureLower);
 		}
 	}
 	@Test public void twoTickRefusalsAndCompetingDueAnimationsNeverBecomeFailedRolls() throws Exception
@@ -1866,7 +1867,7 @@ public class AttemptTrackerPluginTest
 			else { h.chat(ChatMessageType.GAMEMESSAGE, refusal); }
 			h.tick(2);
 			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-			assertEquals(refusal, 0, session.twoTickAttempts());
+			assertEquals(refusal, 0, session.modeledAttempts(true));
 		}
 	}
 	@Test public void twoTickFinalCatchAndStopChatPacketOrderHaveIdenticalCounts() throws Exception
@@ -1879,7 +1880,7 @@ public class AttemptTrackerPluginTest
 			if (!stopFirst) { h.chat(ChatMessageType.GAMEMESSAGE, "Your inventory is too full to hold any more fish."); }
 			h.tick(2);
 			com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-			assertEquals(1, session.twoTickCatches); assertEquals(0, session.twoTickFailures); assertEquals(1, session.twoTickAttempts());
+			assertEquals(1, session.modeledCatches); assertEquals(0, session.modeledFailureLower); assertEquals(1, session.modeledAttempts(true));
 		}
 	}
 	@Test public void twoTickCompletedCatchSurvivesLureExhaustionAndAccessoryChargeChange() throws Exception
@@ -1889,14 +1890,14 @@ public class AttemptTrackerPluginTest
 		ItemContainer worn = h.client.getItemContainer(InventoryID.WORN);
 		when(worn.getItems()).thenReturn(new Item[]{new Item(1234, 1), new Item(5678, 1)}); h.animation(-1); h.tick(2);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(1, session.twoTickCatches); assertEquals(1, session.twoTickAttempts()); assertEquals(1.0, session.rate(false), 0);
+		assertEquals(1, session.modeledCatches); assertEquals(1, session.modeledAttempts(true)); assertEquals(1.0, session.rate(false), 0);
 	}
 	@Test public void twoTickOutOfPhaseCatchRollsBackLatestSegmentButKeepsObservedCatches() throws Exception
 	{
 		Harness h = new Harness(false); h.configureTwoTick(); h.twoTickFish(true); h.tick(0); h.twoTickFlinch(false); h.tick(1); h.twoTickFish(false); h.tick(2);
 		h.twoTickFish(true); h.tick(3);
 		com.attempttracker.core.FishingSession session = ((com.attempttracker.core.FishingSessions)get(h.plugin, "fishingSessions")).current();
-		assertEquals(2, session.catches); assertEquals(0, session.twoTickAttempts()); assertTrue(Double.isNaN(session.rate(false)));
+		assertEquals(2, session.catches); assertEquals(0, session.modeledAttempts(true)); assertTrue(Double.isNaN(session.rate(false)));
 	}
 
 	private static final class Harness

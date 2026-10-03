@@ -37,15 +37,62 @@ public class AttemptTrackerPanelTest
 			panel.setSize(225, 900); for (int i = 0; i < 3; i++) { layout(panel); } assertVisibleLabelsFit(panel);
 		});
 	}
-	@Test public void adaptiveRateAndPossibleFailuresFitAtNormalSidebarWidth() throws Exception
+	@Test public void adaptiveOnlyActivityRetainsCatchesWithoutPublishingAnAttemptRange() throws Exception
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
 			FishingSession session = new FishingSession(); session.catches = session.adaptiveCatches = 30; session.adaptiveFailureUpper = 60; session.adaptiveTiming = true;
 			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Collections.singletonList(session), "Fishing", "2t interactions (rolls unverified)");
-			assertEquals("0-60", AttemptTrackerPanel.failures(session)); assertEquals("33.3%-100.0%", AttemptTrackerPanel.rates(session));
-			assertTrue(hasLabel(panel, "Adaptive timing: possible range"));
+			assertEquals("--", AttemptTrackerPanel.failures(session)); assertEquals("--", AttemptTrackerPanel.rates(session));
+			assertTrue(hasLabel(panel, "30")); assertTrue(hasLabel(panel, "Waiting for supported attempts"));
+			assertFalse(hasLabel(panel, "Adaptive timing: possible range")); assertEquals(60, session.adaptiveFailureUpper);
 			panel.setSize(225, 900); for (int i = 0; i < 3; i++) { layout(panel); } assertVisibleLabelsFit(panel);
+		});
+	}
+	@Test public void modeledPercentageUsesQualifiedTimerSampleAndPreservesHistorySelection() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			FishingSession current = session("current", 100); current.measuredCatches = 10;
+			current.adaptiveCatches = 50; current.adaptiveFailureUpper = 200; current.adaptiveTiming = true;
+			current.modeledCatches = 40; current.modeledFailureLower = current.modeledFailureUpper = 10; current.modeledTiming = true;
+			FishingSession older = new FishingSession(); older.id = "older"; older.catches = older.adaptiveCatches = 30; older.adaptiveFailureUpper = 60;
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Arrays.asList(current, older), "Fishing", "");
+			assertEquals("10", AttemptTrackerPanel.failures(current)); assertEquals("80.0%", AttemptTrackerPanel.rates(current));
+			assertTrue(hasLabel(panel, "Timing sample: 40 of 100 catches"));
+			String tooltip = findLabel(panel, "Timing sample: 40 of 100 catches").getToolTipText();
+			assertTrue(tooltip.contains("50 qualified, inferred attempts")); assertTrue(tooltip.contains("observed timer operations")); assertTrue(tooltip.contains("not directly verified"));
+			JList<?> list = find(panel, JList.class); list.setSelectedIndex(1);
+			assertTrue(hasLabel(panel, "30")); assertTrue(hasLabel(panel, "Waiting for supported attempts")); assertFalse(hasLabel(panel, "80.0%"));
+			list.setSelectedIndex(0); current.modeledFailureUpper = 11; panel.refresh(Arrays.asList(current, older), "Fishing", "");
+			assertEquals("10-11", AttemptTrackerPanel.failures(current)); assertEquals("78.4%-80.0%", AttemptTrackerPanel.rates(current));
+			panel.setSize(225, 900); for (int i = 0; i < 3; i++) { layout(panel); } assertVisibleLabelsFit(panel);
+		});
+	}
+	@Test public void supportedVariableLureRangesRemainVisibleAndEmptySamplesDifferFromZeroSuccess() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			FishingSession variable = session("variable", 100); variable.minimumFailures = 5; variable.maximumFailures = 6; variable.variableTiming = true;
+			assertEquals("5-6", AttemptTrackerPanel.failures(variable)); assertEquals("94.3%-95.2%", AttemptTrackerPanel.rates(variable));
+			FishingSession empty = new FishingSession(); empty.modeledTiming = true; empty.modeledFailureUpper = 1;
+			assertEquals("--", AttemptTrackerPanel.failures(empty)); assertEquals("--", AttemptTrackerPanel.rates(empty));
+			empty.modeledFailureLower = 1; assertEquals("1", AttemptTrackerPanel.failures(empty)); assertEquals("0.0%", AttemptTrackerPanel.rates(empty));
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Collections.singletonList(empty), "Fishing", "");
+			assertTrue(hasLabel(panel, "0.0%")); assertTrue(hasLabel(panel, "Timing sample: 0 of 0 catches"));
+		});
+	}
+	@Test public void hiddenModeledUpdatesAvoidSwingWorkAndReopenTheLatestSample() throws Exception
+	{
+		SwingUtilities.invokeAndWait(() ->
+		{
+			FishingSession session = new FishingSession(); session.id = "modeled"; session.catches = 10; session.modeledTiming = true;
+			AttemptTrackerPanel panel = activePanel(() -> {}, () -> {}); panel.refresh(Collections.singletonList(session), "Fishing", "");
+			JList<?> list = find(panel, JList.class); AtomicInteger changes = countModelEvents(list); panel.onDeactivate();
+			for (int i = 1; i <= 8; i++) { session.modeledCatches = i; session.modeledFailureLower = session.modeledFailureUpper = 2; panel.refresh(Collections.singletonList(session), "Fishing", ""); }
+			assertEquals(0, changes.get()); assertTrue(hasLabel(panel, "Waiting for supported attempts"));
+			panel.onActivate(); assertEquals(1, changes.get()); assertTrue(hasLabel(panel, "80.0%")); assertTrue(hasLabel(panel, "Timing sample: 8 of 10 catches"));
+			session.loggedMillis = 5000; panel.refresh(Collections.singletonList(session), "Fishing", ""); assertEquals(1, changes.get());
 		});
 	}
 	@Test

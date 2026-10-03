@@ -53,7 +53,7 @@ public final class FishingSessionStore
 	}
 	public void exportCsv(List<FishingSession> sessions, Filepath destination) throws IOException
 	{
-		StringBuilder csv = new StringBuilder("session_id,started_at_utc,ended_at_utc,catch_success,measured_catches,catch_fail_min,catch_fail_max,catch_rate_min,catch_rate_max,logged_in_ms,fishing_ms,fishing_ticks,variable_timing,adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches,two_tick_catches,two_tick_failures,two_tick_timing\r\n");
+		StringBuilder csv = new StringBuilder("session_id,started_at_utc,ended_at_utc,catch_success,measured_catches,catch_fail_min,catch_fail_max,catch_rate_min,catch_rate_max,logged_in_ms,fishing_ms,fishing_ticks,variable_timing,adaptive_catches,adaptive_fail_upper,adaptive_timing,rate_catches,two_tick_catches,two_tick_failures,two_tick_timing,modeled_catches,modeled_fail_min,modeled_fail_max,modeled_timing\r\n");
 		for (FishingSession session : sessions)
 		{
 			csv.append(SessionStore.csvText(session.id)).append(',')
@@ -67,7 +67,9 @@ public final class FishingSessionStore
 				.append(session.adaptiveCatches).append(',').append(session.adaptiveFailureUpper).append(',')
 				.append(session.adaptiveTiming).append(',').append(session.rateCatches()).append(',')
 				.append(session.twoTickCatches).append(',').append(session.twoTickFailures).append(',')
-				.append(session.twoTickTiming).append("\r\n");
+				.append(session.twoTickTiming).append(',').append(session.modeledCatches).append(',')
+				.append(session.modeledFailureLower).append(',').append(session.modeledFailureUpper).append(',')
+				.append(session.modeledTiming).append("\r\n");
 		}
 		// The chooser authorizes only this file; do not access its parent or siblings.
 		destination.write(csv.toString());

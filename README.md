@@ -11,4 +11,4 @@ A simple fishing tracker that shows:
 
 Fishing time pauses when you stop fishing, log out, fill your inventory, or the spot moves. Session totals stay saved until you reset them.
 
-Includes supported attack-assisted two-tick harpooning, with a catch rate based on qualified attempts. Other altered fishing timing shows a possible catch-rate range. Failed attempts are inferred.
+Tracks qualified tick-manipulated fishing from observed timer actions, including supported two-tick harpooning and three-tick methods. Catch rates use supported attempts; failed catches are inferred.

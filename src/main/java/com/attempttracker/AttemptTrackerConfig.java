@@ -21,7 +21,7 @@ public interface AttemptTrackerConfig extends Config
 	@ConfigItem(keyName = "trackAllFish", name = "Include all fish", description = "Track all recognized fishing outcomes instead of only sharks", section = display, position = 2)
 	default boolean trackAllFish() { return true; }
 
-	@ConfigItem(keyName = "adaptiveTiming", name = "Adaptive fishing timing", description = "Retain percentage bounds for altered or unknown timing. Possible attempt windows are not confirmed failed rolls.", section = display, position = 3)
+	@ConfigItem(keyName = "adaptiveTiming", name = "Tick-manipulated timing", description = "Infer attempts from qualified shared-timer actions, including flinching, production and food. Unsupported or ambiguous actions are excluded.", section = display, position = 3)
 	default boolean adaptiveTiming() { return true; }
 
 	@Range(min = 0, max = 100)

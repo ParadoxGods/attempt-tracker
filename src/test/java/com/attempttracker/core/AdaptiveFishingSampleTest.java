@@ -19,18 +19,21 @@ public class AdaptiveFishingSampleTest
 					sample.observe(tick, true, caught, false, false, false, 0);
 				}
 				FishingSession session = new FishingSession(); session.catches = session.adaptiveCatches = sample.getCatches(); session.adaptiveFailureUpper = sample.getFailuresUpper();
-				assertEquals(catches, session.rateCatches()); assertTrue(session.rate(false) <= (double)catches / rolls); assertTrue(session.rate(true) >= (double)catches / rolls);
+				assertEquals(catches, session.adaptiveCatches);
+				assertTrue(catches / ((double)catches + session.adaptiveFailureUpper) <= (double)catches / rolls);
+				assertTrue(Double.isNaN(session.rate(false))); assertTrue(Double.isNaN(session.rate(true)));
 			}
 		}
 	}
-	@Test public void twoTickCatchesRemainInTheRateWithoutInventingFailedRolls()
+	@Test public void twoTickActivityWindowsRemainDiagnosticEvidenceWithoutEstablishingRate()
 	{
 		AdaptiveFishingSample sample = new AdaptiveFishingSample();
 		for (int tick = 0; tick < 20; tick++) { sample.observe(tick, true, tick % 2 == 1 ? 1 : 0, false, false, false, 0); }
 		assertEquals(10, sample.getCatches()); assertEquals(10, sample.getFailuresUpper());
 		FishingSession session = new FishingSession(); session.catches = session.adaptiveCatches = sample.getCatches();
 		session.adaptiveFailureUpper = sample.getFailuresUpper();
-		assertEquals(0.5, session.rate(false), 0); assertEquals(1, session.rate(true), 0);
+		assertEquals(10, session.adaptiveCatches); assertEquals(10, session.adaptiveFailureUpper);
+		assertEquals(0, session.rateCatches()); assertTrue(Double.isNaN(session.rate(false))); assertTrue(Double.isNaN(session.rate(true)));
 	}
 	@Test public void invalidatedStrictRunIsRecoveredExactlyOnceAndNotDoubleCounted()
 	{
